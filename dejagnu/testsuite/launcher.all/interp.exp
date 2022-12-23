@@ -1,0 +1,57 @@
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+# each element: { name args envars exit_code output_re... }
+set tests {
+    { "have shell, always" {--DGTimpl sh} {} 0 "" }
+    { "report error probing 'echo'" {--DGTimpl echo} {} 2 "" }
+
+    { "have no Awk"	{--DGTimpl awk}  {AWK=bogus GAWK=bogus} 1 "" }
+    { "have Awk"	{--DGTimpl awk}  {AWK=true  GAWK=bogus} 0 "" }
+
+    { "have no GNU Awk"	{--DGTimpl gawk} {GAWK=bogus} 1 "" }
+    { "have GNU Awk"	{--DGTimpl gawk} {GAWK=true }  0 "" }
+
+    { "GNU Awk substitutes for Awk"
+			{--DGTimpl awk}  {AWK=bogus GAWK=true} 0 "" }
+
+    { "have no Tcl"	{--DGTimpl tcl}  {TCLSH=bogus EXPECT=bogus} 1 "" }
+    { "have Tcl"	{--DGTimpl tcl}  {TCLSH=true  EXPECT=bogus} 0 "" }
+
+    { "have no Expect"	{--DGTimpl exp}  {EXPECT=bogus} 1 "" }
+    { "have Expect"	{--DGTimpl exp}  {EXPECT=true }  0 "" }
+
+    { "Expect substitutes for Tcl"
+			{--DGTimpl tcl}  {TCLSH=bogus EXPECT=true} 0 "" }
+}
+
+if { [which true] == 0 || [which bogus] != 0 } {
+    skip_dejagnu_launcher_tests \
+	"Either 'true' is not on PATH or 'bogus' is." \
+	unresolved $tests
+} elseif { ![file isdirectory [file join [file dirname $LAUNCHER] commands]] } {
+    skip_dejagnu_launcher_tests \
+	"The 'commands' directory is not present in the source tree." \
+	unsupported $tests
+} else {
+    run_dejagnu_launcher_tests $LAUNCHER $tests
+}
+
+#EOF

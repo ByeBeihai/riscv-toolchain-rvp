@@ -1,0 +1,225 @@
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+# This library provides functions for generating subset-sum-distinct sets
+# using a construction published by Tom Bohman in:
+#  T. Bohman, A construction for sets of integers with distinct subset sums,
+#   The Electronic. Journal of Combinatorics 5 (1998) /#R3
+#  <URL:http://www.combinatorics.org/Volume_5/PDF/v5i1r3.pdf>,
+#   retrieved 2018-12-28 SHA-1 1c35035427b3406a44f7290f13ec8fbc3d105041
+namespace eval ::math_utils::Bohman_SSD {
+
+    # b_n(i)
+    proc b { n i } {
+	if { $n <= 1    } { error "invalid parameter n: $n" }
+	if { $i <= 2*$n } { error "invalid parameter i: $i" }
+
+	if { $i >= 2*$n + 4 } {
+	    return [expr { round(sqrt(2*($i + 2 - 2*$n))) }]
+	} elseif { $i == 2*$n + 3 } {
+	    return [expr { $n + 2 }]
+	} else { # $i == 2*$n + 1 || $i == 2*$n + 2
+	    return [expr { $n + 1 }]
+	}
+    }
+
+    variable d_memo
+    array unset d_memo
+    array set d_memo {}
+
+    # d_n(i)
+    proc d { n i } {
+	variable d_memo
+	if { [info exists d_memo($n,$i)] } { return $d_memo($n,$i) }
+
+	if { $n <= 1 } { error "invalid parameter n: $n" }
+	if { $i <  1 } { error "invalid parameter i: $i" }
+
+	if { $i == $n } {
+	    return 1
+	} elseif { $i < $n } {
+	    set j [expr { $n - $i }]
+	    return [expr { 2 * round(pow(4,($j - 1))) }]
+	} elseif { $i <= 2*$n } {
+	    set j [expr { $i - $n }]
+	    return [expr { round(pow(4,($j - 1))) }]
+	} else { # $i > 2*$n
+	    set sum 0
+	    for { set j [expr { $i - [b $n $i] }] } { $j < $i } { incr j } {
+		incr sum [d $n $j]
+	    }
+	    set d_memo($n,$i) $sum
+	    return $sum
+	}
+    }
+
+    # S_{n,m} returns list
+    proc S { n m } {
+	if { $n <= 1   } { error "invalid parameter n: $n" }
+	if { $m < 2*$n } { error "invalid parameter m: $m" }
+
+	set dv [list]
+	for { set i 1 } { $i <= $m } { incr i } { lappend dv [d $n $i] }
+	set sum 0
+	foreach d $dv { incr sum $d }
+	set result [list]
+	foreach d $dv {
+	    lappend result $sum
+	    incr sum -$d
+	}
+	return $result
+    }
+
+    # b'_n(i)
+    proc bp { n i } {
+	if { $n < 1         } { error "invalid parameter n: $n" }
+	if { $i <= 2*$n + 1 } { error "invalid parameter i: $i" }
+
+	if { $i >= 2*$n + 5 } {
+	    return [expr { round(sqrt(2*($i + 1 - 2*$n))) }]
+	} elseif { $i == 2*$n + 2 } {
+	    return [expr { $n + 1 }]
+	} else { # $i == 2*$n + 3 || $i == 2*$n + 4
+	    return [expr { $n + 2 }]
+	}
+    }
+
+    variable dp_memo
+    array unset dp_memo
+    array set dp_memo {}
+
+    # d'_n(i)
+    proc dp { n i } {
+	variable dp_memo
+	if { [info exists dp_memo($n,$i)] } { return $dp_memo($n,$i) }
+
+	if { $n < 1 } { error "invalid parameter n: $n" }
+	if { $i < 1 } { error "invalid parameter i: $i" }
+
+	if { $i == $n + 1 } {
+	    return 1
+	} elseif { $i < $n + 1 } {
+	    set j [expr { $n + 1 - $i }]
+	    return [expr { round(pow(4,($j - 1))) }]
+	} elseif { $i <= 2*$n + 1 } {
+	    set j [expr { $i - $n - 1 }]
+	    return [expr { 2 * round(pow(4,($j - 1))) }]
+	} else { # $i > 2*$n + 1
+	    set sum 0
+	    for { set j [expr { $i - [bp $n $i] }] } { $j < $i } { incr j } {
+		incr sum [dp $n $j]
+	    }
+	    set dp_memo($n,$i) $sum
+	    return $sum
+	}
+    }
+    # The example for d'_3 in the paper is wrong starting at i=11.  The
+    # paper says that it is 200, but it is actually 300.
+
+    # S'_{n,m} returns list
+    proc Sp { n m } {
+	if { $n < 1        } { error "invalid parameter n: $n" }
+	if { $m < 2*$n + 1 } { error "invalid parameter m: $m" }
+
+	set dv [list]
+	for { set i 1 } { $i <= $m } { incr i } { lappend dv [dp $n $i] }
+	set sum 0
+	foreach d $dv { incr sum $d }
+	set result [list]
+	foreach d $dv {
+	    lappend result $sum
+	    incr sum -$d
+	}
+	return $result
+    }
+
+    # Given a list of numbers, verify that all sums of all subsets are in
+    # fact unique.
+    #
+    # This is a brute force search and not based on Bohman's paper.  This
+    # quickly becomes impractical for large lists, requiring inordinate
+    # amounts of both time and space.
+    proc check { base } {
+	set bound [expr { int(pow(2,[llength $base])) }]
+	for { set i 0 } { $i < $bound } { incr i } {
+	    set R $i
+	    set sum 0
+	    foreach v $base {
+		if { $R & 1 } { incr sum $v }
+		set R [expr { $R >> 1 }]
+	    }
+	    if { [info exists output($sum)] } {
+		# emit counterexample
+		set cexl [list]
+		set R $i
+		foreach v $base {
+		    if { $R & 1 } { lappend cexl $v }
+		    set R [expr { $R >> 1 }]
+		}
+		set cex [join $cexl "+"]
+		append cex "=" $sum "="
+		set cexl [list]
+		set R $output($sum)
+		foreach v $base {
+		    if { $R & 1 } { lappend cexl $v }
+		    set R [expr { $R >> 1 }]
+		}
+		append cex [join $cexl "+"]
+		error "list is not subset-sum-distinct: $cex"
+	    }
+	    set output($sum) $i
+	}
+	return 1
+    }
+
+    # Given a list of numbers and a sum of a subset of that list, find a
+    # subset that produces the given sum.  If the list of numbers is
+    # subset-sum-distinct, this will return the unique solution.
+    # Otherwise, an unspecified solution is returned.  If the sum is not
+    # actually a sum of a subset of the list, an empty list is returned.
+    #
+    # This is a brute force search and not based on Bohman's paper.  This
+    # requires constant space, but quickly becomes impractical for large
+    # lists, requiring inordinate time to complete.
+    proc summands { base goal } {
+	set bound [expr { int(pow(2,[llength $base])) }]
+	for { set i 0 } { $i < $bound } { incr i } {
+	    set R $i
+	    set sum 0
+	    foreach v $base {
+		if { $R & 1 } { incr sum $v }
+		set R [expr { $R >> 1 }]
+	    }
+	    if { $sum == $goal } {
+		set resl [list]
+		set R $i
+		foreach v $base {
+		    if { $R & 1 } { lappend resl $v }
+		    set R [expr { $R >> 1 }]
+		}
+		return $resl
+	    }
+	}
+	return [list]
+    }
+
+}
+
+#EOF

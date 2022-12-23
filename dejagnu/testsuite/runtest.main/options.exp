@@ -1,0 +1,106 @@
+# Copyright (C) 1992-2016, 2018, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Rob Savoye <rob@welcomehome.org>.
+
+load_lib util-defs.exp
+
+runtest_setup_nested_testsuite
+
+#
+# Set up the list.
+# 1st field is the command line option.
+# 2nd field is the pattern to match.
+#	NOTE - No variable substitutions can be used.
+# 3rd field is an optional message to print with PASS/FAIL.
+#
+
+set tests {
+    { "--help" "USAGE:*" "Display help" }
+    { "-v -v -v" "Verbose level is 3" "Verbose set correctly" }
+    { "-v --tool xXx"
+	"Found.*nested-init\..*Loading.*utils\.exp"
+	"Loading library files" }
+    { "-v --tool xXx"
+	"Expect binary is.*Using.*main test driver"
+	"Loading basic packages" }
+    { "--F --tool x"
+	"Illegal Argument \"--F\""
+	"Bad argument" }
+    { "--tool x"
+	"Couldn't find tool init file"
+	"Bad tool name" }
+    { "-v --target m68k-vxworks"
+	"Target is m68k-vxworks"
+	"--target option" }
+    { "-v --target_board flash"
+	"Running target flash"
+	"--target_board option" }
+    { "-v --host sparc-sun-sunos4.1.9"
+	"Native configuration is sparc-sun-sunos4.1.9"
+	"--host option" }
+    { "-v -a"
+	"Print all test output to screen"
+	"--all option (short form)" }
+    { "-v --all"
+	"Print all test output to screen"
+	"--all option" }
+    { "-v --ignore foo.exp"
+	"Ignoring test foo.exp"
+	"--ignore option" }
+    { "-v --objdir xXx"
+	"Using test binaries in xXx"
+	"--objdir option" }
+    { "-v --tool xXx"
+	"Testing xXx"
+	"--tool option" }
+    { "-v --debug"
+	"Expect Debugging is ON"
+	"--debug option" }
+    { "-v --reboot"
+	"Will reboot the target"
+	"--reboot option" }
+    { "-v --strace 1"
+	"Source Trace level is now 1.* 1  if"
+	"--strace option" }
+    { "-v --D0"
+	"Tcl debugger is ON"
+	"--D0 option" }
+    { "-V"
+	"DejaGnu version.*Expect version.*Tcl version.*"
+	"-V option" }
+    { "--version"
+	"DejaGnu version.*Expect version.*Tcl version.*"
+	"--version option" }
+    { "-v --xml"
+	"XML logging turned on"
+	"--xml option" }
+}
+
+foreach t $tests {
+    if [util_test $RUNTEST \
+	    "[lindex $t 0] --local_init nested-init.exp --tool null" \
+	    "" \
+	    "[lindex $t 1]"] {
+	fail "[lindex $t 2]"
+    } else {
+	pass "[lindex $t 2]"
+    }
+}
+
+runtest_cleanup_nested_testsuite

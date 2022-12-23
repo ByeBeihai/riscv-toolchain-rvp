@@ -1,0 +1,68 @@
+# Copyright (C) 1995-2016, 2018, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file tests handling of fatal errors in testcases.
+# The way we do this is to recursively invoke ourselves on a small testsuite
+# and analyze the results.
+
+load_lib util-defs.exp
+
+runtest_setup_nested_testsuite
+
+set tests {
+    { "run only simple test"
+	"simple.exp"
+	"PASS: simple test.*\
+	*expected passes\[ \t\]+1\n" }
+    { "continue after divide-by-zero, reporting error"
+	"error-dbz.exp simple.exp"
+	"PASS: running error-dbz.exp.*\
+	*UNRESOLVED: .* aborted.*\
+	*PASS: simple test.*\
+	*expected passes\[ \t\]+2\n.*unresolved testcases\[ \t\]+1\n" }
+    { "continue after auto-loaded divide-by-zero, reporting error"
+	"error-al-dbz.exp simple.exp"
+	"PASS: running error-al-dbz.exp.*\
+	*UNRESOLVED: .* aborted.*\
+	*PASS: simple test.*\
+	*expected passes\[ \t\]+2\n.*unresolved testcases\[ \t\]+1\n" }
+    { "continue after calling undefined procedure, reporting error"
+	"error-undef.exp simple.exp"
+	"PASS: running error-undef.exp.*\
+	*UNRESOLVED: .* aborted.*\
+	*PASS: simple test.*\
+	*expected passes\[ \t\]+2\n.*unresolved testcases\[ \t\]+1\n" }
+}
+
+foreach t $tests {
+    if [util_test $RUNTEST \
+	    "--local_init nested-init.exp --tool error\
+		-a [lindex $t 1]" \
+	    "" \
+	    [lindex $t 2]] {
+	fail [lindex $t 0]
+    } else {
+	pass [lindex $t 0]
+    }
+}
+
+runtest_cleanup_nested_testsuite
+
+# remove the autoload files generated during the test
+file delete -force \
+    [testsuite file -object -test nested testsuite error.test lib]

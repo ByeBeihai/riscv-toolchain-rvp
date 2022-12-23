@@ -1,0 +1,215 @@
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+set header_column_names { PASS FAIL ?PASS ?FAIL UNSUP UNRES UNTEST }
+set separator_count 0
+set re_digit_columns {}
+for { set i 0 } { $i < 7 } { incr i } {
+    append re_digit_columns {[[:space:]]+([[:digit:]]+)}
+}
+
+set test_names { pass fail kpass kfail xpass xfail
+		 unsupported unresolved untested
+		 note warning error }
+set test_results { PASS FAIL KPASS KFAIL XPASS XFAIL
+		   UNSUPPORTED UNRESOLVED UNTESTED
+		   NOTE WARNING ERROR }
+
+foreach name $test_names result $test_results {
+    set fd [open [testsuite file -object -test onetest one-${name}.sum] w]
+    puts $fd "${result}: one test"
+    close $fd
+}
+
+set stty_init { -onlcr -onlret }
+
+spawn /bin/sh -c \
+    "cd [testsuite file -object -test onetest]\
+     && exec $LAUNCHER report-card"
+
+# check header
+expect {
+    -re {^[[:space:]]+_+[\r\n]+} {
+	# discard initial header line
+	exp_continue
+    }
+    -re {^[[:space:]]+/([^\r\n]*)[\r\n]+} {
+	# check column labels
+	foreach want $header_column_names have $expect_out(1,string) {
+	    if { $have eq $want } {
+		pass "header item $want"
+	    } else {
+		fail "header item $want"
+	    }
+	}
+	exp_continue
+    }
+    -re {^[[:space:]]+\|-+[\r\n]+} {
+	incr separator_count
+    }
+}
+
+# check results
+array unset scoreboard
+array set scoreboard {
+    pass 0 fail 0 kpass 0 kfail 0 xpass 0 xfail 0
+    unsupported 0 unresolved 0 untested 0
+    note 0 warning 0 error 0
+}
+array unset column_subexp_map
+array set column_subexp_map {
+    pass 2 fail 3 kpass 4 kfail 5 xpass 4 xfail 5
+    unsupported 6 unresolved 7 untested 8
+    note 0 warning 9 error 9
+}
+set re_table_row {^[[:space:]]*one-([[:alpha:]]+)[[:space:]]+\|}
+append re_table_row $re_digit_columns
+append re_table_row {((?:[[:space:]]+![EW]!)*)[\r\n]+}
+expect {
+    -re $re_table_row {
+	for { set i 2 } { $i < 9 } { incr i } {
+	    if { $expect_out($i,string)\
+		     == ( $i == $column_subexp_map($expect_out(1,string))\
+			      ? 1 : 0 ) } {
+		incr scoreboard($expect_out(1,string))
+	    } else {
+		incr scoreboard($expect_out(1,string)) -1
+	    }
+	}
+	set have_warning_tag [string match "*!W!*" $expect_out(9,string)]
+	set have_error_tag [string match "*!E!*" $expect_out(9,string)]
+	if { $column_subexp_map($expect_out(1,string)) == 9 } {
+	    # testing an after-row tag
+	    switch -- $expect_out(1,string) {
+		warning {
+		    incr scoreboard(warning) \
+			[expr { $have_warning_tag ? 1 : -1 }]
+		    incr scoreboard(error) \
+			[expr { $have_error_tag   ? -1 : 1 }]
+		}
+		error {
+		    incr scoreboard(warning) \
+			[expr { $have_warning_tag ? -1 : 1 }]
+		    incr scoreboard(error) \
+			[expr { $have_error_tag   ? 1 : -1 }]
+		}
+		default { error "unknown tag $expect_out(1,string)" }
+	    }
+	} else {
+	    incr scoreboard(warning) [expr { $have_warning_tag ? -1 : 1 }]
+	    incr scoreboard(error)   [expr { $have_error_tag   ? -1 : 1 }]
+	}
+	exp_continue
+    }
+    -re {^[[:space:]]+\|-+[\r\n]+} {
+	incr separator_count
+    }
+}
+foreach result [lsort [array names scoreboard]] {
+    verbose -log "scoreboard($result) = $scoreboard($result)"
+}
+foreach result [array names scoreboard] {
+    if { $scoreboard($result) == ( 7 + ( $column_subexp_map($result) == 9\
+					     ? [llength $test_names] : 0 ) ) } {
+	pass "count result $result"
+    } else {
+	fail "count result $result"
+    }
+}
+
+# check totals
+set column_totals { pad 1 1 2 2 1 1 1 }
+set re_totals_row {^[[:space:]]+\|}
+append re_totals_row $re_digit_columns
+append re_totals_row {[\r\n]+}
+set totals_matched 0
+expect {
+    -re $re_totals_row {
+	for { set i 1 } { $i < 8 } { incr i } {
+	    if { [lindex $column_totals $i] == $expect_out($i,string) } {
+		incr totals_matched
+	    }
+	}
+	exp_continue
+    }
+    -re {^[[:space:]]+\|-+[\r\n]+} {
+	incr separator_count
+    }
+    -re {^[[:space:]]+\\_+[\r\n]+} {
+	# all done
+    }
+}
+
+if { $totals_matched == 7 } {
+    pass "expected total count"
+} else {
+    fail "expected total count"
+}
+
+if { $separator_count == 2 } {
+    pass "expected separator lines"
+} else {
+    fail "expected separator lines"
+}
+
+# Ensure that totals map correctly by reading each file one at a time
+foreach name $test_names {
+    set separator_count 0
+    spawn /bin/sh -c \
+	"cd [testsuite file -object -test onetest]\
+	 && exec $LAUNCHER report-card one-${name}.sum"
+    # skip header
+    expect {
+	-re {^[[:space:]]+_+[\r\n]+} { exp_continue }
+	-re {^[[:space:]]+/([^\r\n]*)[\r\n]+} { exp_continue }
+	-re {^[[:space:]]+\|-+[\r\n]+} { incr separator_count }
+    }
+    # capture the item line
+    expect -re {^one-[^|]+(\|[[:space:][:digit:]]*)[[:space:]!EW]*[\r\n]+} {
+	regsub {[[:space:]]*$} $expect_out(1,string) "" item_line
+    }
+    # skip the separator
+    expect -re {^[[:space:]]+\|-+[\r\n]+} { incr separator_count }
+    # capture the totals line
+    expect -re {^[[:space:]]+(\|[[:space:][:digit:]]*)[\r\n]+} {
+	regsub {[[:space:]]*$} $expect_out(1,string) "" totals_line
+    }
+    # skip the footer
+    expect -re {.+} { exp_continue }
+    # were item and totals lines even produced?
+    if { [info exists item_line] && [info exists totals_line] } {
+	# do the item and totals lines match?
+	if { $item_line eq $totals_line } {
+	    pass "verify total for $name"
+	} else {
+	    fail "verify total for $name"
+	}
+    } else {
+	# either an item line or the totals line was not seen
+	unresolved "verify total for $name"
+    }
+    if { $separator_count == 2 } {
+	pass "expected separator lines for $name"
+    } else {
+	fail "expected separator lines for $name"
+    }
+}
+
+#EOF

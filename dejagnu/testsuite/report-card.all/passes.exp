@@ -1,0 +1,276 @@
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+load_lib bohman_ssd.exp
+
+set header_column_names { PASS FAIL ?PASS ?FAIL UNSUP UNRES UNTEST }
+set result_column_map {
+    PASS FAIL { KPASS XPASS } { KFAIL XFAIL }
+    UNSUPPORTED UNRESOLVED UNTESTED
+}
+
+set test_results { PASS FAIL KPASS KFAIL XPASS XFAIL
+		   UNSUPPORTED UNRESOLVED UNTESTED }
+
+# each entry: { {mode n} { suffix_tag... } { pass... } { { result name }... } }
+array unset tuplemap
+array set tuplemap {
+    basic	{ {S  3} { a b } { foo bar }
+	{ { PASS pass } { FAIL fail } } }
+    kxpass	{ {S  2} { a b } { foo bar }
+	{ { KPASS kpass } { XPASS xpass } } }
+    kxfail	{ {Sp 2} { a b } { foo bar }
+	{ { KFAIL kfail } { XFAIL xfail } } }
+    unresult	{ {S  2} { a b } { foo bar }
+	{ { UNSUPPORTED unsupported }
+	    { UNRESOLVED unresolved } { UNTESTED untested } } }
+}
+
+# Given: TUPLES: { { result ... }... }, PASSES: { pass... }
+# Return: Cartesian product TUPLES x PASSES: { { result pass ... }... }
+proc build_tuple_list { tuples passes } {
+    set result [list]
+    foreach cell $tuples {
+	foreach pass $passes {
+	    lappend result [linsert $cell 1 $pass]
+	}
+    }
+    return $result
+}
+
+# Given: TUPLES: { { result pass name }... }, MODE: S | Sp, N
+# Return: { { result pass name count }... } where COUNT is from an SSD-set
+proc annotate_tuple_list { tuples mode n } {
+    set m [llength $tuples]
+    set ssd [switch -- $mode {
+	S  { ::math_utils::Bohman_SSD::S  $n $m }
+	Sp { ::math_utils::Bohman_SSD::Sp $n $m }
+    }]
+    set result [list]
+    foreach cell $tuples ssdterm $ssd {
+	lappend result [linsert $cell end $ssdterm]
+    }
+    return $result
+}
+
+# Given: TUPLES: { { result pass name count }... }; (RESULT,PASS) not unique
+# Return: { { result pass expected_total }... } where (RESULT,PASS) is unique
+proc compute_expected_pass_totals { tuples } {
+    foreach cell $tuples {  set count([lrange $cell 0 1]) 0 }
+    foreach cell $tuples { incr count([lrange $cell 0 1]) [lindex $cell 3] }
+    set result [list]
+    foreach name [lsort [array names count]] {
+	lappend result [concat $name $count($name)]
+    }
+    return $result
+}
+
+# Given: TUPLES: { { result pass name count }... }; (RESULT,PASS) not unique
+# Return: { { result expected_grand_total }... }
+proc compute_expected_grand_totals { tuples } {
+    foreach cell $tuples {  set count([lindex $cell 0]) 0 }
+    foreach cell $tuples { incr count([lindex $cell 0]) [lindex $cell 3] }
+    set result [list]
+    foreach name [lsort [array names count]] {
+	lappend result [list $name $count($name)]
+    }
+    return $result
+}
+
+# Given: TUPLES: { { result pass ... }... } where (RESULT,PASS) repeats later
+# Return: { { { result pass ... }... }... }; (RESULT,PASS) unique per sublist
+proc split_tuple_list { tuples } {
+    set result [list]
+    set sublist [list]
+    foreach cell $tuples {
+	if { [info exists seen([lrange $cell 0 1])] } {
+	    # split here
+	    lappend result $sublist
+	    set sublist [list]
+	    array unset seen
+	}
+	lappend sublist $cell
+	set seen([lrange $cell 0 1]) 1
+    }
+    lappend result $sublist
+    return $result
+}
+
+# TUPLES is: { { result pass name count }... }
+proc write_file { basename tuples } {
+    set fd [open [testsuite file -object -test passes ${basename}.sum] w]
+    set pass {}
+    foreach cell [lsort -index 1 $tuples] {
+	if { $pass ne [lindex $cell 1] } {
+	    puts $fd "Running pass `[lindex $cell 1]' ..."
+	    set pass [lindex $cell 1]
+	}
+	for { set i 1 } { $i <= [lindex $cell 3] } { incr i } {
+	    puts $fd "[lindex $cell 0]: [lindex $cell 1]:\
+			[lindex $cell 2] test ${i}/[lindex $cell 3]"
+	}
+    }
+    close $fd
+}
+
+proc run_multipass_output_test { filetag } {
+    global LAUNCHER
+    global header_column_names
+    global result_column_map
+    global test_results
+    global tuplemap
+
+    set ssdpar	[lindex $tuplemap($filetag) 0]
+    set tags	[lindex $tuplemap($filetag) 1]
+    set passes	[lindex $tuplemap($filetag) 2]
+    set results	{}
+    foreach dummy $tags { lappend results [lindex $tuplemap($filetag) 3] }
+    set results [join $results]
+
+    # initialize totals arrays to zero
+    foreach result $test_results { set have_grand_totals($result) 0 }
+    array set want_grand_totals [array get have_grand_totals]
+    foreach cell [build_tuple_list $test_results $passes] {
+	set have_pass_totals([join [lrange $cell 0 1] ","]) 0
+    }
+    array set want_pass_totals [array get have_pass_totals]
+
+    # get the test list
+    set list [build_tuple_list $results $passes]
+    set list [annotate_tuple_list $list [lindex $ssdpar 0] [lindex $ssdpar 1]]
+
+    # compute expected totals
+    #  note that this only fills non-zero array positions
+    foreach cell [compute_expected_pass_totals $list] {
+	set want_pass_totals([join [lrange $cell 0 1] ","]) [lindex $cell 2]
+    }
+    array set want_grand_totals [join [compute_expected_grand_totals $list]]
+
+    # write the test data files and store expected per-file counts
+    foreach tag $tags fileset [split_tuple_list $list] {
+	# write test file
+	write_file "${filetag}-${tag}" $fileset
+	# initialize test results for this file
+	foreach result $test_results {
+	    foreach pass $passes {
+		set want_file_counts(${filetag}-${tag},$result,$pass) 0
+		set have_file_counts(${filetag}-${tag},$result,$pass) 0
+	    }
+	}
+	# store expected results for this file
+	foreach cell $fileset {
+	    set want_file_counts(${filetag}-${tag},[join [lrange $cell 0 1] \
+							","]) [lindex $cell 3]
+	}
+    }
+
+    # run the dejagnu-report-card tool
+    set separator_count 0
+    spawn /bin/sh -c \
+	"cd [testsuite file -object -test passes]\
+	 && exec $LAUNCHER report-card ${filetag}-*.sum"
+
+    # skip header
+    expect {
+	-re {^[[:space:]]+_+[\r\n]+} { exp_continue }
+	-re {^[[:space:]]+/([^\r\n]*)[\r\n]+} { exp_continue }
+	-re {^[[:space:]]+\|-+[\r\n]+} { incr separator_count }
+    }
+
+    # read individual file lines
+    set re_file_row {^[[:space:]]*}
+    append re_file_row {(} $filetag {-[[:alpha:]]+)[[:space:]]+}
+    append re_file_row {/[[:space:]]+([[:alpha:]]+)[[:space:]]+\|}
+    append re_file_row {[[:space:]]*([[:digit:][:space:]]+)[\r\n]+}
+    expect {
+	-re $re_file_row {
+	    foreach column $result_column_map colname $header_column_names \
+		have $expect_out(3,string) {
+		    set want 0
+		    foreach rs $column {
+			set tmp $expect_out(1,string),$rs,$expect_out(2,string)
+			incr want $want_file_counts($tmp)
+		    }
+		    if { $have == $want } {
+			pass "count $colname\
+			      for pass $expect_out(2,string)\
+			      in file $expect_out(1,string)"
+		    } else {
+			fail "count $colname\
+			      for pass $expect_out(2,string)\
+			      in file $expect_out(1,string)"
+		    }
+		}
+	    exp_continue
+	}
+	-re {^[[:space:]]+\|-+[\r\n]+} { incr separator_count }
+    }
+
+    # read pass totals lines
+    set re_pass_row {^[[:space:]]+([[:alpha:]]+)[[:space:]]+\|}
+    append re_pass_row {[[:space:]]*([[:digit:][:space:]]+)[\r\n]+}
+    expect {
+	-re $re_pass_row {
+	    foreach column $result_column_map colname $header_column_names \
+		have $expect_out(2,string) {
+		    set want 0
+		    foreach rs $column {
+			incr want $want_pass_totals($rs,$expect_out(1,string))
+		    }
+		    if { $have == $want } {
+			pass "total $colname for pass $expect_out(1,string)"
+		    } else {
+			fail "total $colname for pass $expect_out(1,string)"
+		    }
+		}
+	    exp_continue
+	}
+	-re {^[[:space:]]+\|-+[\r\n]+} { incr separator_count }
+    }
+
+    # read grand totals line
+    expect -re {^[[:space:]]+\|[[:space:]]*([[:digit:][:space:]]+)[\r\n]+} {
+	foreach column $result_column_map colname $header_column_names \
+	    have $expect_out(1,string) {
+		set want 0
+		foreach rs $column { incr want $want_grand_totals($rs) }
+		if { $have == $want } {
+		    pass "grand total $colname"
+		} else {
+		    fail "grand total $colname"
+		}
+	    }
+    }
+
+    # skip the footer
+    expect -re {.+} { exp_continue }
+
+    if { $separator_count == 3 } {
+	pass "expected separator lines"
+    } else {
+	fail "expected separator lines"
+    }
+}
+
+foreach filetag [lsort [array names tuplemap]] {
+    run_multipass_output_test $filetag
+}
+
+#EOF

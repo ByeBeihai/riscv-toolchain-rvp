@@ -1,0 +1,228 @@
+# Test procedures in lib/utils.exp.				-*- Tcl -*-
+#
+# Copyright (C) 1996-2019, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source $srcdir/$subdir/default_procs.tcl
+} else {
+    puts "ERROR: $srcdir$subdir/default_procs.tcl doesn't exist"
+}
+
+set file $srcdir/../lib/utils.exp
+if [ file exists $file] {
+    source $file
+} else {
+    puts "ERROR: $file doesn't exist"
+}
+
+# Test getdirs:
+#
+run_tests [subst {
+    { lib_pat_test getdirs
+	{[file join $srcdir runtest.libs]}
+	[file join $srcdir runtest.libs topdir]
+	"getdirs toplevel, no arguments" }
+    { lib_pat_test getdirs
+	{[file join $srcdir runtest.libs] "top*"}
+	[file join $srcdir runtest.libs topdir]
+	"getdirs toplevel, one subdir" }
+    { lib_pat_test getdirs
+	{[file join $srcdir runtest.libs topdir]}
+	"*topdir*subdir\[12\]*topdir*subdir\[12\]"
+	"getdirs toplevel, two subdirs" }
+    { lib_pat_test getdirs
+	{[file join $srcdir runtest.libs nothere]}
+	""
+	"getdirs toplevel, non-existent subdir"}
+}]
+
+# Test relative_filename:
+#
+run_tests {
+    { lib_ret_test relative_filename {"/foo/test" "/foo/test/bar/baz"} "bar/baz"
+	"relative_filename, simple prefix" }
+    { lib_ret_test relative_filename {"/foo/test" "/bar/test"} "../../bar/test"
+	"relative_filename, up to top" }
+    { lib_ret_test relative_filename {"/tmp/foo-test" "/tmp/bar/test"} "../bar/test"
+	"relative_filename, up one level" }
+    { lib_ret_test relative_filename {"/tmp/foo-test" "/tmp/foo-test"} ""
+	"relative_filename, same name" }
+}
+
+# Test find:
+#
+run_tests [subst {
+    { lib_pat_test find
+	{[file join $srcdir runtest.libs topdir subdir2] "sub*"}
+	"*/subdir2/subfile2"
+	"find, only one level deep" }
+    { lib_regexp_test find
+	{[file join $srcdir runtest.libs topdir subdir1] "sub*"}
+	".*/subdir1/subsubdir1/subsubfile1( |$)"
+	"find, two levels deep" }
+}]
+
+# Environment varible utility tests.
+#
+
+if [info exists env(TESTRUN)] {
+    unset env(TESTRUN)
+}
+
+# Test setenv:
+#
+setenv TESTRUN FooBar
+if [info exists env(TESTRUN)] {
+    if { $env(TESTRUN) eq "FooBar" } {
+	pass "setenv, set an environment variable"
+    } else {
+	fail "setenv, set an environment variable"
+    }
+} else {
+    fail "setenv, set an environment variable"
+}
+
+# Test getenv:
+#
+if [info exists env(TESTRUN)] {
+    if { [getenv TESTRUN] eq "FooBar" } {
+	pass "getenv, get an environment variable"
+    } else {
+	fail "getenv, get an environment variable"
+    }
+} else {
+    untested "getenv, get an environment variable"
+}
+
+# Test unsetenv:
+#
+if [info exists env(TESTRUN)] {
+    unsetenv TESTRUN
+    if [info exists env(TESTRUN)] {
+	fail "unsetenv, unset an environment variable"
+    } else {
+	pass "unsetenv, unset an environment variable"
+    }
+} else {
+    untested "unsetenv, unset an environment variable"
+}
+
+# Test 'which' using a relative path.
+#
+if {[which ./config.status] != 0} {
+  pass "which, relative path to config.status"
+} else {
+  fail "which, relative path to config.status"
+}
+
+# Test 'which' using an absolute path.
+#
+if {[which [file join $objdir .. config.status]] != 0} {
+  pass "which, absolute path to config.status"
+} else {
+  fail "which, absolute path to config.status"
+}
+
+# Test 'which sh'.
+#
+if {[which sh] != 0} {
+  pass "which, sh"
+} else {
+  fail "which, sh"
+}
+
+### Do not adjust the comment on the next line. The grep test case
+### depends on it.
+
+# Test grep!
+if {[llength [grep $srcdir/runtest.libs/utils.test "^# Test grep!"]] == 1} {
+  pass "grep, no options"
+} else {
+  fail "grep, no options"
+}
+
+# Test grep with line option.
+set result [grep $srcdir/runtest.libs/utils.test "^# Test grep!" line]
+if {[llength $result] == 1 && [regexp {^\d+ # Test grep!} [lindex $result 0]]} {
+  pass "grep, line option"
+} else {
+  fail "grep, line option"
+}
+
+# Test grep with -n option.
+set result [grep -n $srcdir/runtest.libs/utils.test "^# Test grep!"]
+if {[llength $result] == 1 && [regexp {^\d+ # Test grep!} [lindex $result 0]]} {
+  pass "grep, -n option"
+} else {
+  fail "grep, -n option"
+}
+
+# Test diff proc.
+
+# Setup.
+set f1 [open diff1.txt w]
+set f2 [open diff2.txt w]
+foreach f [list $f1 $f2] {
+  puts $f "Hello world"
+  close $f
+}
+
+# Two identical files; expect 1.
+if {[diff diff1.txt diff2.txt] == 1} {
+  pass "diff, identical files"
+} else {
+  fail "diff, identical files"
+}
+
+# Now remove one file; expect 0.
+file delete diff1.txt
+if {[diff diff1.txt diff2.txt] == 0} {
+  pass "diff, one file missing"
+} else {
+  fail "diff, one file missing"
+}
+
+# diff1.txt differs from diff2.txt; expect -1.
+set f [open diff1.txt w]
+puts $f "Hello Cygnus"
+close $f
+if {[diff diff1.txt diff2.txt] == -1} {
+  pass "diff, different files"
+} else {
+  fail "diff, different files"
+}
+
+# diff teardown.
+file delete -force diff1.txt diff2.txt
+
+
+# Test runtest_file_p.
+
+run_tests {
+    { lib_bool_test runtest_file_p {{foo.exp} foo.c} true
+	"runtest_file_p, bare foo.exp matches foo.c" }
+    { lib_bool_test runtest_file_p {{foo.exp foo.c} foo.c} true
+	"runtest_file_p, foo.exp=foo.c matches foo.c" }
+    { lib_bool_test runtest_file_p {{foo.exp foo.*} foo.c} true
+	"runtest_file_p, foo.exp=foo.* matches foo.c" }
+    { lib_bool_test runtest_file_p {{foo.exp bar.*} foo.c} false
+	"runtest_file_p, foo.exp=bar.* excludes foo.c" }
+}
+
+puts "END utils.test"

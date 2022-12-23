@@ -1,0 +1,59 @@
+# Copyright (C) 1995-2016, 2018, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file tests pass/fail/etc.
+# The way we do this is to recursively invoke ourselves on a small testsuite
+# and analyze the results.
+
+load_lib util-defs.exp
+
+runtest_setup_nested_testsuite
+
+set tests {
+    { stats pass "expected passes\[ \t\]+1\n" }
+    { stats fail "unexpected failures\[ \t\]+1\n" }
+    { stats xpass "unexpected successes\[ \t\]+1\n" }
+    { stats xfail "expected failures\[ \t\]+1\n" }
+    { stats kpass "unknown successes\[ \t\]+1\n" }
+    { stats kfail "known failures\[ \t\]+1\n" }
+    { stats untested "untested testcases\[ \t\]+1\n" }
+    { stats unresolved "unresolved testcases\[ \t\]+1\n" }
+    { stats unsupported "unsupported tests\[ \t\]+1\n" }
+
+    { unit pass "expected passes\[ \t\]+1\n" }
+    { unit fail "unexpected failures\[ \t\]+1\n" }
+    { unit xpass "unexpected successes\[ \t\]+1\n" }
+    { unit xfail "expected failures\[ \t\]+1\n" }
+    { unit untested "untested testcases\[ \t\]+1\n" }
+    { unit unresolved "unresolved testcases\[ \t\]+1\n" }
+}
+
+foreach t $tests {
+    if { [util_test $RUNTEST \
+	    "--local_init nested-init.exp --tool stat\
+		STATS_TEST=[lindex $t 1] [lindex $t 0]-sub.exp" \
+	    "" \
+	    [lindex $t 2]] } {
+	fail "[lindex $t 0]/[lindex $t 1]"
+	runtest_copy_nested_testsuite_log stat
+    } else {
+	pass "[lindex $t 0]/[lindex $t 1]"
+    }
+}
+
+runtest_cleanup_nested_testsuite

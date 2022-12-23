@@ -1,0 +1,125 @@
+# Copyright (C) 2018, 2021 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+if { ![info exists LAUNCHER] } {
+    set LAUNCHER \
+	[file normalize \
+	     [file join [file dirname [testsuite file -source -top]] dejagnu]]
+}
+verbose "Using LAUNCHER $LAUNCHER" 2
+
+if { [which $LAUNCHER] == 0 } {
+    perror "Can't find LAUNCHER = $LAUNCHER"
+    exit 2
+}
+
+# run dejagnu(1) LAUNCHER with ARGLIST, returning { output exit_code }
+proc dejagnu_run { launcher arglist envlist } {
+    global errorCode
+
+    set exec_cmd [list exec]
+    if { [llength $envlist] > 0 } {
+	lappend exec_cmd env
+	foreach var $envlist { lappend exec_cmd $var }
+    }
+    lappend exec_cmd $launcher
+
+    # reset errorCode
+    catch { error }
+
+    verbose -log "Running \"[lrange $exec_cmd 1 end] $arglist\" ..."
+    catch { eval $exec_cmd $arglist } output
+    verbose -log $output
+
+    if { [lindex $errorCode 0] eq "CHILDSTATUS" } {
+	return [list $output [lindex $errorCode 2]]
+    } else {
+	return [list $output 0]
+    }
+}
+
+# evaluate a test against LAUNCHER, returning true if it passes
+# TEST is a list:  { name arglist envlist exit_code output_re... }
+proc try_dejagnu_launcher { launcher test } {
+    foreach part [lrange $test 4 end] { append re $part }
+
+    if { [llength [lindex $test 2]] > 0 } {
+	verbose "Spawning \"env [lindex $test 2] $launcher [lindex $test 1]\" ..."
+    } else {
+	verbose "Spawning \"$launcher [lindex $test 1]\" ..."
+    }
+    verbose "Expecting to match {$re} ..." 2
+    set result [dejagnu_run $launcher [lindex $test 1] [lindex $test 2]]
+    verbose "Exit code [lindex $result 1]; output {[lindex $result 0]}" 2
+
+    if { [regexp $re [lindex $result 0]]
+	 && [lindex $test 3] == [lindex $result 1] } {
+	return 1
+    } else {
+	return 0
+    }
+}
+
+proc link_dejagnu_launcher_test_item {link target} {
+    if {[file exists $link]} {
+	verbose -log "   item $link already exists"
+	return
+    }
+    verbose -log "linking $link"
+    verbose -log "     to $target"
+    if {[catch {file link -symbolic $link [file normalize $target]} err]} {
+	perror $err 0
+    }
+}
+
+proc run_dejagnu_launcher_tests { launcher tests } {
+    foreach test $tests {
+	if { [lindex $test 0] == "#" } {
+	    # ignore comments in test list
+	} elseif { [llength $test] == 1 } {
+	    # name only is a stub
+	    untested [lindex $test 0]
+	} elseif { [try_dejagnu_launcher $launcher $test] } {
+	    pass [lindex $test 0]
+	} else {
+	    fail [lindex $test 0]
+	}
+    }
+}
+
+proc skip_dejagnu_launcher_tests { why result tests } {
+    perror $why 0
+    foreach test $tests {
+	if { [lindex $test 0] == "#" } {
+	    # ignore comments in test list
+	} else {
+	    $result [lindex $test 0]
+	}
+    }
+}
+
+# stub: dejagnu(1) itself is non-interactive
+proc dejagnu_exit {} {}
+
+# stub: dejagnu(1) does not have a separate version number
+proc dejagnu_version {} {
+}
+
+#EOF

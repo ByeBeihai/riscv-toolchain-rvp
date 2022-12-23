@@ -1,0 +1,102 @@
+# Copyright (C) 2021 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file is a regression test for PR48155, where running with the
+# environment variable SHELL set to a C shell could cause an error running
+# config.guess that would not be properly detected.
+
+load_lib util-defs.exp
+
+runtest_setup_nested_testsuite
+
+# We need a modified local init file for this test; the regular
+# nested-init.exp will set host_triplet, which will cause runtest to assume
+# that that is the build_triplet and avoid attempting to run config.guess.
+exec sed -e /_triplet/d < nested-init.exp > pr48155-init.exp
+
+proc test_pr48155_setup {} {
+    upvar 1 envlist envlist
+    upvar 1 save_env save_env
+    upvar 1 unset_env unset_env
+
+    set unset_env [list]
+    foreach {name value} $envlist {
+	if { [info exists ::env($name)] } {
+	    set save_env($name) $::env($name)
+	} else {
+	    lappend unset_env $name
+	}
+    }
+    foreach name {CONFIG_SHELL SHELL} {
+	if { [info exists ::env($name)] } {
+	    set save_env($name) $::env($name)
+	    unset ::env($name)
+	}
+    }
+    array set ::env $envlist
+}
+proc test_pr48155_cleanup {} {
+    upvar 1 save_env save_env
+    upvar 1 unset_env unset_env
+
+    foreach name $unset_env { unset ::env($name) }
+    unset -nocomplain ::env(CONFIG_SHELL) ::env(SHELL)
+    array set ::env [array get save_env]
+}
+
+proc test_pr48155_error { name envlist output } {
+    global RUNTEST
+
+    test_pr48155_setup
+
+    if { [util_test $RUNTEST \
+	      "--local_init pr48155-init.exp --tool null" \
+	      "" \
+	      $output] } {
+	fail $name
+    } else {
+	pass $name
+    }
+
+    test_pr48155_cleanup
+}
+
+test_pr48155_error "bogus CONFIG_SHELL as false"		\
+    [list CONFIG_SHELL [which false]]				\
+    "exited on code .*produced bogus build triplet:"
+test_pr48155_error "bogus CONFIG_SHELL as true"			\
+    [list CONFIG_SHELL [which true]]				\
+    "produced bogus build triplet:"
+test_pr48155_error "bogus CONFIG_SHELL as simulated C shell"	\
+    [list CONFIG_SHELL [testsuite file -source -test pr48155-csh.sh]] \
+    "exited on code 1.*produced bogus build triplet:"
+
+# The following tests may change if planned future enhancements to reject
+# unusable values of SHELL are implemented.
+
+test_pr48155_error "bogus SHELL as false"			\
+    [list SHELL [which false]]					\
+    "exited on code .*produced bogus build triplet:"
+test_pr48155_error "bogus SHELL as true"			\
+    [list SHELL [which true]]					\
+    "produced bogus build triplet:"
+test_pr48155_error "bogus SHELL as simulated C shell"		\
+    [list SHELL [testsuite file -source -test pr48155-csh.sh]]	\
+    "exited on code 1.*produced bogus build triplet:"
+
+runtest_cleanup_nested_testsuite

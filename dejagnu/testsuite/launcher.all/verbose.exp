@@ -1,0 +1,55 @@
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+# each element: { name args envars exit_code output_re... }
+set tests {
+    { "empty command" {} {} 2 "ERROR: no command given" }
+    { "empty; verbose 1" {-v} {} 2
+	"Verbose level is 1\nRunning launcher [^\n]*\n"
+	"Looking for commands [^\n]*\nRunning nothing.\n"
+	"ERROR: no command given" }
+    { "empty; verbose 2" {-v -v} {} 2
+	"Verbose level is 2\nRunning launcher [^\n]*\n"
+	"Running from source directory\n"
+	"Looking for commands [^\n]*\nRunning nothing.\n"
+	"ERROR: no command given" }
+    { "empty; verbose 3" {-v -v -v} {} 2
+	"Verbose level is 3\nRunning launcher [^\n]*\n"
+	"Running from source directory\n"
+	"Looking for commands [^\n]*\nRunning nothing.\n"
+	"Awk interpreter [^\n]*\nGNU Awk interpreter [^\n]*\n"
+	"Bash interpreter [^\n]*\n"
+	"Expect interpreter [^\n]*\nTcl interpreter [^\n]*\n"
+	"ERROR: no command given" }
+}
+
+lappend tests [list "check version" {--version} {} 0 \
+		   [format "dejagnu auxiliary launcher \\(DejaGnu\\) %s" \
+			$frame_version]]
+
+if { ![file isdirectory [file join [file dirname $LAUNCHER] commands]] } {
+    skip_dejagnu_launcher_tests \
+	"The 'commands' directory is not present in the source tree." \
+	unsupported $tests
+} else {
+    run_dejagnu_launcher_tests $LAUNCHER $tests
+}
+
+#EOF

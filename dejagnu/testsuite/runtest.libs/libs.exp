@@ -1,0 +1,103 @@
+# Copyright (C) 1997-2016, 2018, 2019 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+load_lib libsup.exp
+
+proc process_test { test } {
+    global EXPECT
+
+    verbose "Running $test ..." 0
+    set text "\[- A-Za-z0-9\,\.\;\"\_\:\'\`\(\)\!\#\=\+\?\&\*]*"
+
+    set timeout 150
+
+    if [file exists $test] {
+	verbose "Processing test $test" 2
+
+	exp_send "interp create test_case\n"
+	expect "interp create test_case*test_case*expect*>"
+	exp_send {test_case eval {foreach { n v }} \
+		      [list [array get default_vars]] {{ set $n $v }}}
+	exp_send "\n"
+	expect "expect*>"
+	exp_send "test_case eval source $test"
+	# wait for command to echo...
+	expect "test_case eval source $test"
+	exp_send "\n"
+	expect "\n"
+	expect {
+	    "no such file or directory" {
+		perror "$test wouldn't run" 0
+	    }
+	    -re {^[\r\n]+} { exp_continue }
+	    -re "^\[^\r\n\]*NOTSUPPORTED: $text\[\r\n\]*" {
+		unsupported "[lrange $expect_out(0,string) 1 end]"
+		exp_continue
+	    }
+	    -re "^\[^\r\n\]*NOTTESTED: $text\[\r\n\]*" {
+		untested "[lrange $expect_out(0,string) 1 end]"
+		exp_continue
+	    }
+	    -re "^\[^\r\n\]*PASSED: $text\[\r\n\]*" {
+		pass "[lrange $expect_out(0,string) 1 end]"
+		exp_continue
+	    }
+	    -re "^\[^\r\n\]*FAILED: $text\[\r\n\]*" {
+		fail "[lrange $expect_out(0,string) 1 end]"
+		exp_continue
+	    }
+	    -re "^\[^\r\n\]*WARNED: $text\[\r\n\]*" {
+		verbose $expect_out(0,string) 2
+		exp_continue
+	    }
+	    -re "^\[^\r\n\]*ERRORED: $text\[\r\n\]*" {
+		verbose $expect_out(0,string) 2
+		exp_continue
+	    }
+	    -re "^END \[^.\]+\\.test\[\r\n\]*" {
+		# done
+	    }
+	    -re "^\[^\r\n\]+\[\r\n\]+" {
+		exp_continue
+	    }
+	    -re {^expect[[:digit:]]+\.[[:digit:]]+>} {
+		perror "$test did not complete" 0
+	    }
+	    timeout {
+		perror "$test timed out" 0
+		exp_continue
+	    }
+	    eof {
+		perror "Expect process exited early" 0
+	    }
+	}
+	exp_send "interp delete test_case"
+	# wait for command to echo...
+	expect "interp delete test_case"
+	exp_send "\n"
+	expect "expect*>"
+    } else {
+	perror "$test doesn't exist" 0
+    }
+}
+
+start_expect
+foreach i [lsort -dictionary [glob [testsuite file -source -test *.test]]] {
+    if { [runtest_file_p $runtests $i] } { process_test $i }
+}
+stop_expect

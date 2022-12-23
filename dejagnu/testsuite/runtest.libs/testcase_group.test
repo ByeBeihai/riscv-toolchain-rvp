@@ -1,0 +1,79 @@
+# test "testcase group" API call				-*- Tcl -*-
+
+# Copyright (C) 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source "$srcdir/$subdir/default_procs.tcl"
+} else {
+    puts "ERROR: $srcdir/$subdir/default_procs.tcl doesn't exist"
+}
+if [ file exists $srcdir/../lib/framework.exp] {
+    source $srcdir/../lib/framework.exp
+} else {
+    puts "ERROR: $srcdir/../lib/framework.exp doesn't exist"
+}
+
+# test group handling
+
+run_tests {
+    { lib_errpat_test testcase { group bogus-command }
+	"*unknown*bogus-command*"
+	"reject bogus group operation" }
+    { lib_errpat_test testcase { group begin "no spaces in group names" }
+	"*spaces in group names*is not valid*"
+	"reject entering group with spaces in name" }
+
+    { lib_ret_test testcase { group } ""
+	"initially in no group" }
+    { lib_ret_test testcase { group begin foo } "foo"
+	"enter group 'foo'" }
+    { lib_ret_test testcase { group } "foo"
+	"now in group 'foo'" }
+    { lib_ret_test testcase { group begin bar } "bar"
+	"enter group 'bar' (foo/bar)" }
+    { lib_ret_test testcase { group } "foo/bar"
+	"now in group 'foo/bar'" }
+    { lib_errpat_test testcase { group end foo }
+	"*expected to close group*foo*found group*bar*"
+	"error on mismatch leaving 'foo' in 'foo/bar'" }
+    { lib_errpat_test testcase { group end "foo/bar" }
+	"*expected to close group*foo/bar*found group*bar*"
+	"error on mismatch leaving 'foo/bar'" }
+    { lib_ret_test testcase { group end bar } "bar"
+	"leave group 'bar' (foo)" }
+    { lib_ret_test testcase { group } "foo"
+	"back in group 'foo'" }
+    { lib_ret_test testcase { group begin "baz/bar" } "baz/bar"
+	"enter group 'baz/bar' (foo/baz/bar)" }
+    { lib_ret_test testcase { group } "foo/baz/bar"
+	"now in group 'foo/baz/bar'" }
+    { lib_ret_test testcase { group eval "quux" {testcase group} }
+	"foo/baz/bar/quux"
+	"group 'foo/baz/bar/quux' entered for eval" }
+    { lib_ret_test testcase { group } "foo/baz/bar"
+	"still in group 'foo/baz/bar' after eval" }
+    { lib_ret_test testcase { group end "baz/bar" } "baz/bar"
+	"leave group 'baz/bar' (foo)" }
+    { lib_ret_test testcase { group end foo } "foo"
+	"leave group 'foo'" }
+    { lib_ret_test testcase { group } ""
+	"finally in no group" }
+}
+
+puts "END testcase_group.test"

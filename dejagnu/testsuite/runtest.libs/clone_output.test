@@ -1,0 +1,104 @@
+# test clone_output						-*- Tcl -*-
+#
+# Copyright (C) 1996-2019, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source $srcdir/$subdir/default_procs.tcl
+} else {
+    puts "ERROR: $srcdir/$subdir/default_procs.tcl doesn't exist"
+}
+if [ file exists $srcdir/../lib/framework.exp] {
+    source $srcdir/../lib/framework.exp
+} else {
+    puts "ERROR: $srcdir/../lib/framework.exp doesn't exist"
+}
+
+set all_flag 0
+set errno ""
+
+# The results in these tests are slightly convoluted because everything
+# sent to the error or user stream is also copied to the log stream when
+# actually using Expect, but the test harness records exactly what is
+# explicitly passed, rather than what Expect will do with it.
+
+# stuff that shouldn't print anything without all_flag set
+set all_flag 0
+run_tests {
+    { lib_output_test clone_output {"PASS: Foo"}
+	{ tty "" log "PASS: Foo\n" user "" error "" }
+	"clone_output(pass) without all_flag set" }
+    { lib_output_test clone_output {"XFAIL: Foo"}
+	{ tty "" log "XFAIL: Foo\n" user "" error "" }
+	"clone_output(xfail) without all_flag set" }
+    { lib_output_test clone_output {"KFAIL: Foo"}
+	{ tty "" log "KFAIL: Foo\n" user "" error "" }
+	"clone_output(kfail) without all_flag set" }
+    { lib_output_test clone_output {"UNRESOLVED: Foo"}
+	{ tty "" log "UNRESOLVED: Foo\n" user "" error "" }
+	"clone_output(unresolved) without all_flag set" }
+    { lib_output_test clone_output {"UNSUPPORTED: Foo"}
+	{ tty "" log "UNSUPPORTED: Foo\n" user "" error "" }
+	"clone_output(unsupported) without all_flag set" }
+    { lib_output_test clone_output {"UNTESTED: Foo"}
+	{ tty "" log "UNTESTED: Foo\n" user "" error "" }
+	"clone_output(untested) without all_flag set" }
+    { lib_output_test clone_output {"ERROR: Bar"}
+	{ tty "" log "" user "" error "ERROR: Bar\n" }
+	"clone_output(error) without all_flag set" }
+    { lib_output_test clone_output {"WARNING: Bar"}
+	{ tty "" log "" user "" error "WARNING: Bar\n" }
+	"clone_output(warning) without all_flag set" }
+    { lib_output_test clone_output {"NOTE: Bar"}
+	{ tty "" log "" user "" error "NOTE: Bar\n" }
+	"clone_output(note) without all_flag set" }
+}
+
+# tests for all_flag set to 1
+set all_flag 1
+run_tests {
+    { lib_output_test clone_output {"PASS: Foo"}
+	{ tty "" log "" user "PASS: Foo\n" error "" }
+	"clone_output(pass) with all_flag set" }
+    { lib_output_test clone_output {"XFAIL: Foo"}
+	{ tty "" log "" user "XFAIL: Foo\n" error "" }
+	"clone_output(xfail) with all_flag set" }
+    { lib_output_test clone_output {"KFAIL: Foo"}
+	{ tty "" log "" user "KFAIL: Foo\n" error "" }
+	"clone_output(kfail) with all_flag set" }
+    { lib_output_test clone_output {"UNRESOLVED: Foo"}
+	{ tty "" log "" user "UNRESOLVED: Foo\n" error "" }
+	"clone_output(unresolved) with all_flag set" }
+    { lib_output_test clone_output {"UNSUPPORTED: Foo"}
+	{ tty "" log "" user "UNSUPPORTED: Foo\n" error "" }
+	"clone_output(unsupported) with all_flag set" }
+    { lib_output_test clone_output {"UNTESTED: Foo"}
+	{ tty "" log "" user "UNTESTED: Foo\n" error "" }
+	"clone_output(untested) with all_flag set" }
+    { lib_output_test clone_output {"ERROR: Bar"}
+	{ tty "" log "" user "" error "ERROR: Bar\n" }
+	"clone_output(error) with all_flag set" }
+    { lib_output_test clone_output {"WARNING: Bar"}
+	{ tty "" log "" user "" error "WARNING: Bar\n" }
+	"clone_output(warning) with all_flag set" }
+    { lib_output_test clone_output {"NOTE: Bar"}
+	{ tty "" log "" user "" error "NOTE: Bar\n" }
+	"clone_output(note) with all_flag set" }
+}
+
+puts "END clone_output.test"

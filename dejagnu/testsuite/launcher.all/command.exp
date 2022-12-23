@@ -1,0 +1,228 @@
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Jacob Bachmeyer.
+
+# each element:  { launcher_alias
+#			{ name args envars exit_code output_re... }... }
+set tests {
+    { dejagnu
+	{ "#" direct calls }
+
+	{ "dejagnu foo as Tcl"
+	    {foo -v -v} {EXPECT=true  TCLSH=true } 0
+	    "Found subcommand foo with variants:  tcl sh\n"
+	    "Selected variant tcl" }
+	{ "dejagnu foo as Tcl via Expect"
+	    {foo -v -v} {EXPECT=true  TCLSH=bogus} 0
+	    "Found subcommand foo with variants:  tcl sh\n"
+	    "Selected variant tcl" }
+	{ "dejagnu foo as shell"
+	    {foo -v -v} {EXPECT=bogus TCLSH=bogus} 0
+	    "Found subcommand foo with variants:  tcl sh\n"
+	    "Selected variant sh" }
+
+	{ "dejagnu bar as Awk"
+	    {bar -v -v} {AWK=true  GAWK=true } 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant awk" }
+	{ "dejagnu bar as Awk via GNU Awk"
+	    {bar -v -v} {AWK=bogus GAWK=true } 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant awk" }
+	{ "dejagnu bar as shell"
+	    {bar -v -v} {AWK=bogus GAWK=bogus} 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant sh" }
+
+	{ "dejagnu bar shadows bar-baz"
+	    {bar baz -v -v} {AWK=true} 0
+	    "Found subcommand bar with variants:  awk sh" }
+	{ "dejagnu bar-baz works"
+	    {bar-baz -v -v} {AWK=true} 0
+	    "Found subcommand bar-baz with variants:  awk" }
+	{ "dejagnu bar-baz fails without Awk"
+	    {bar-baz -v -v} {AWK=bogus GAWK=bogus} 2
+	    "Found subcommand bar-baz with variants:  awk\n"
+	    "ERROR: no variant of bar-baz was selected" }
+
+	{ "dejagnu baz-quux works"
+	    {baz-quux -v -v} {GAWK=true} 0
+	    "Found subcommand baz-quux with variants:  gawk\n"
+	    "Selected variant gawk" }
+	{ "dejagnu baz quux works"
+	    {baz quux -v -v} {GAWK=true} 0
+	    "Found subcommand baz-quux with variants:  gawk\n"
+	    "Selected variant gawk" }
+
+	{ "#" "bug #33817:  ensure that the failure is 'no variant'"
+	    " rather than 'could not resolve command'" }
+	{ "dejagnu baz-quux is resolved but fails without GNU Awk (bug #33817)"
+	    {baz-quux} {GAWK=bogus} 2
+	    "ERROR: no variant of baz-quux was selected" }
+	{ "dejagnu baz quux is resolved but fails without GNU Awk (bug #33817)"
+	    {baz quux} {GAWK=bogus} 2
+	    "ERROR: no variant of baz-quux was selected" }
+
+	{ "#" invalid direct calls }
+
+	{ "dejagnu -v bar fails"	{-v bar} {} 2
+	    "Running nothing.\nERROR: no command given" }
+
+	{ "dejagnu \"\" bar fails"	{"" bar} {} 2 "ERROR: " }
+	{ "dejagnu \"\" \"\" bar fails"	{"" "" bar} {} 2 "ERROR: " }
+
+	{ "dejagnu baz \"\" quux fails"	{baz "" quux} {GAWK=true} 2 "ERROR: " }
+
+	{ "dejagnu bar \"\" baz finds bar subcommand"
+	    {--DGTimpl echo bar "" baz} {} 0
+	    "command: bar\nargs:  baz" }
+
+	{ "#" help system }
+
+	{ "dejagnu --help works"	{--help} {} 0 "Usage: dejagnu" }
+
+	{ "dejagnu foo --help works if shell variant selected"
+	    {foo --help} {EXPECT=bogus TCLSH=bogus} 0
+	    "foo.sh help message" }
+	{ "dejagnu foo --help fails if Tcl variant selected"
+	    {foo --help} {EXPECT=true  TCLSH=true } 2
+	    "does not contain a help message" }
+
+	{ "dejagnu foo --help fails if no POSIX Awk available"
+	    {foo --help} {EXPECT=bogus TCLSH=bogus AWK=bogus GAWK=bogus} 2
+	    "requires POSIX Awk" }
+	{ "dejagnu foo --help recognizes dummy GNU Awk as Awk"
+	    {foo --help} {EXPECT=bogus TCLSH=bogus AWK=bogus GAWK=true } 2
+	    "does not contain a help message" }
+	{
+	    # The above still fails, because true(1) does not actually
+	    # evaluate Awk programs and the Awk program that tests if a help
+	    # message is present returns true if the launcher should abort.
+	}
+
+    }
+
+    { dejagnu-foo
+	{ "#" calls via dejagnu-foo link }
+	{ "dejagnu-foo as Tcl"
+	    {-v -v} {EXPECT=true  TCLSH=true } 0
+	    "Found subcommand foo with variants:  tcl sh\n"
+	    "Selected variant tcl" }
+	{ "dejagnu-foo as Tcl via Expect"
+	    {-v -v} {EXPECT=true  TCLSH=bogus} 0
+	    "Found subcommand foo with variants:  tcl sh\n"
+	    "Selected variant tcl" }
+	{ "dejagnu-foo as shell"
+	    {-v -v} {EXPECT=bogus TCLSH=bogus} 0
+	    "Found subcommand foo with variants:  tcl sh\n"
+	    "Selected variant sh" }
+    }
+
+    { dejagnu-bar
+	{ "#" calls via dejagnu-bar link }
+	{ "dejagnu-bar as Awk"
+	    {-v -v} {AWK=true  GAWK=true } 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant awk" }
+	{ "dejagnu-bar as Awk via GNU Awk"
+	    {-v -v} {AWK=bogus GAWK=true } 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant awk" }
+	{ "dejagnu-bar as shell"
+	    {-v -v} {AWK=bogus GAWK=bogus} 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant sh" }
+
+	{ "#" false hybrid:  bar shadows bar-baz }
+	{ "dejagnu-bar as Awk shadows bar-baz"
+	    {baz -v -v} {AWK=true} 0
+	    "Found subcommand bar with variants:  awk sh\n"
+	    "Selected variant awk" }
+    }
+
+    { dejagnu-bar-baz
+	{ "#" calls via dejagnu-bar-baz link }
+	{ "dejagnu-bar-baz as Awk"
+	    {-v -v} {AWK=true  GAWK=true } 0
+	    "Found subcommand bar-baz with variants:  awk\n"
+	    "Selected variant awk" }
+	{ "dejagnu-bar-baz as Awk via GNU Awk"
+	    {-v -v} {AWK=bogus GAWK=true } 0
+	    "Found subcommand bar-baz with variants:  awk\n"
+	    "Selected variant awk" }
+	{ "dejagnu-bar-baz fails without Awk"
+	    {-v -v} {AWK=bogus GAWK=bogus} 2
+	    "Found subcommand bar-baz with variants:  awk\n"
+	    "ERROR: no variant of bar-baz was selected" }
+    }
+
+    { dejagnu-baz
+	{ "#" hybrid:  link as prefix }
+	{ "dejagnu-baz quux as GNU Awk"
+	    {quux -v -v} {GAWK=true} 0
+	    "Found subcommand baz-quux with variants:  gawk\n"
+	    "Selected variant gawk" }
+	{ "dejagnu-baz quux fails without GNU Awk"
+	    {quux -v -v} {GAWK=bogus AWK=true} 2
+	    "Found subcommand baz-quux with variants:  gawk\n"
+	    "ERROR: no variant of baz-quux was selected" }
+    }
+
+}
+
+# Build the test environment.
+
+# This must be done at run-time in the build directory because symbolic
+# links are not allowed in GNU source tarballs.
+
+link_dejagnu_launcher_test_item \
+    [testsuite file -object -test command share dejagnu commands] \
+    [testsuite file -source -test command commands]
+foreach alias_item $tests {
+    link_dejagnu_launcher_test_item \
+	[testsuite file -object -test command bin [lindex $alias_item 0]] \
+	$LAUNCHER
+}
+if { ![file exists \
+	   [testsuite file -object -test command share dejagnu commands]] } {
+    foreach alias_set $tests {
+	skip_dejagnu_launcher_tests \
+	    "Could not set up test environment." \
+	    unsupported [lrange $alias_set 1 end]
+    }
+    return
+}
+
+# Run the tests.
+
+if { [which true] == 0 || [which bogus] != 0 } {
+    foreach alias_set $tests {
+	skip_dejagnu_launcher_tests \
+	    "Either 'true' is not on PATH or 'bogus' is." \
+	    unresolved [lrange $alias_set 1 end]
+    }
+} else {
+    foreach alias_set $tests {
+	run_dejagnu_launcher_tests \
+	    [testsuite file -object -test command bin [lindex $alias_set 0]] \
+	    [lrange $alias_set 1 end]
+    }
+}
+
+#EOF

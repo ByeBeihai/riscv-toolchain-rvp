@@ -1,0 +1,103 @@
+# test configuration support					-*- Tcl -*-
+#
+# Copyright (C) 1996-2019, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source $srcdir/$subdir/default_procs.tcl
+} else {
+    puts "ERROR: $srcdir/$subdir/default_procs.tcl doesn't exist"
+}
+if [ file exists $srcdir/../lib/framework.exp] {
+    source $srcdir/../lib/framework.exp
+} else {
+    puts "ERROR: $srcdir/../lib/framework.exp doesn't exist"
+}
+
+set all_flag 1
+
+set host_triplet i586-unknown-linux
+set target_triplet i586-unknown-linux
+set target_cpu i586
+set target_os linux
+set build_triplet i586-unknown-linux
+
+#
+# Tests for a native configuration
+#
+run_tests [subst {
+    { lib_bool_test isbuild {$build_triplet} true
+	"isbuild, native" }
+    { lib_bool_test isbuild {$target_cpu-*-$target_os} true
+	"isbuild, native regexp" }
+    { lib_bool_test isbuild {hppa-ibm-macos} false
+	"isbuild, native bogus config string" }
+
+    { "#" "test default argument for isbuild" }
+    { lib_ret_test isbuild {} $build_triplet
+	"isbuild with no arguments" }
+
+    { "#" "ishost tests" }
+    { lib_bool_test ishost {$host_triplet} true
+	"ishost, native" }
+    { lib_bool_test ishost {$target_cpu-*-$target_os} true
+	"ishost, native regexp" }
+    { lib_bool_test ishost {hppa-ibm-macos} false
+	"ishost, native bogus config string" }
+
+    { "#" "test default argument for ishost" }
+    { lib_ret_test ishost {} $host_triplet
+	"ishost with no arguments" }
+
+    { "#" "istarget tests" }
+    { lib_bool_test istarget {$target_triplet} true
+	"istarget, native" }
+    { lib_bool_test istarget {$target_cpu-*-$target_os} true
+	"istarget, native regexp" }
+    { lib_bool_test istarget {hppa-ibm-macos} false
+	"istarget, native bogus config string" }
+
+    { "#" "test default argument for istarget" }
+    { lib_ret_test istarget {} $target_triplet
+	"istarget with no arguments" }
+}]
+
+run_tests {
+    { lib_bool_test isnative {} true	"isnative, native" }
+    { lib_bool_test is3way {} false	"is3way, native" }
+}
+
+#
+# Tests for a normal cross configuration
+#
+set target_triplet m68k-unknown-elf
+run_tests {
+    { lib_bool_test isnative {} false	"isnative, cross" }
+    { lib_bool_test is3way {} false	"is3way, cross" }
+}
+
+#
+# Tests for a canadian cross configuration
+#
+set host_triplet  i386-unknown-winnt
+run_tests {
+    { lib_bool_test isnative {} false	"isnative, canadian cross" }
+    { lib_bool_test is3way {} true	"is3way, canadian cross" }
+}
+
+puts "END config.test"

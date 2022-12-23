@@ -1,0 +1,11 @@
+.gdb_history
+TAGS
+*~
+*.lo
+*.la
+*.o
+*autom4te.cache
+.deps
+Makefile
+config.log
+config.status

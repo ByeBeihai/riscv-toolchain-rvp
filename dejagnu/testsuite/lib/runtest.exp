@@ -1,0 +1,109 @@
+# Copyright (C) 1992-2016, 2018, 2020, 2021 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file was written by Rob Savoye <rob@welcomehome.org>.
+
+if { ![info exists RUNTEST] } {
+    set RUNTEST [file join [file dirname [testsuite file -source -top]] runtest]
+}
+
+if { ![info exists EXPECT] } {
+    if { [info exists ::env(EXPECT)] } {
+	set EXPECT $::env(EXPECT)
+    } else {
+	set EXPECT expect
+    }
+    verbose "EXPECT defaulting to $EXPECT" 2
+}
+
+if { [which $RUNTEST] == 0 } {
+    perror "Can't find RUNTEST = $RUNTEST"
+    exit 2
+}
+if { [which $EXPECT] == 0 } {
+    perror "Can't find EXPECT = $EXPECT"
+    exit 2
+}
+
+#
+# support procedures for running items in a nested testsuite
+#
+# Note that these procedures establish and use a "tmpdir" variable in the
+# caller's context.
+proc runtest_setup_nested_testsuite {} {
+    global host_triplet
+    upvar 1 tmpdir tmpdir
+
+    if {![info exists tmpdir]} {
+	set tmpdir [testsuite file -object -top tmpdir]
+    }
+
+    set fd [open nested-init.exp w]
+    puts $fd "set host_triplet $host_triplet"
+    puts $fd "set srcdir [testsuite file -source -test nested]"
+    puts $fd "set objdir [testsuite file -object -test nested]"
+    puts $fd "set tmpdir $tmpdir"
+    puts $fd "set outdir $tmpdir"
+    close $fd
+
+    if {![file isdirectory $tmpdir]} {
+	catch {file mkdir $tmpdir}
+    }
+
+    if {![file isdirectory [testsuite file -object -test nested]]} {
+	catch {file mkdir [testsuite file -object -test nested]}
+    }
+}
+
+proc runtest_copy_nested_testsuite_log { tool } {
+    verbose -log -- "---- ${tool}.log from failed test ----"
+    spawn -open [open [testsuite file -object -top tmpdir "${tool}.log"]]
+    expect { .+ { exp_continue } }
+    verbose -log -- "---- end ${tool}.log ----"
+}
+
+proc runtest_cleanup_nested_testsuite {} {
+    upvar 1 tmpdir tmpdir
+
+    file delete -force $tmpdir
+}
+
+
+#
+# runtest_version -- extract and print the version number
+#
+proc runtest_version { } {
+    global RUNTEST
+
+    catch {exec $RUNTEST -V} tmp
+    if { [info exists tmp] } {
+	clone_output "$tmp\n"
+    }
+}
+
+#
+# runtest_load -- loads the program. For runtest, this is just a stub
+#
+proc runtest_load { arg } {
+}
+
+#
+# runtest_exit -- exit the test driver for expect
+#
+proc runtest_exit { } {
+}

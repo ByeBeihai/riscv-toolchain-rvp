@@ -1,0 +1,222 @@
+# test "testsuite file" API call				-*- Tcl -*-
+
+# Copyright (C) 2018 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source "$srcdir/$subdir/default_procs.tcl"
+} else {
+    puts "ERROR: $srcdir/$subdir/default_procs.tcl doesn't exist"
+}
+if [ file exists $srcdir/../lib/framework.exp] {
+    source $srcdir/../lib/framework.exp
+} else {
+    puts "ERROR: $srcdir/../lib/framework.exp doesn't exist"
+}
+if [ file exists $srcdir/../lib/utils.exp] {
+    source $srcdir/../lib/utils.exp
+} else {
+    puts "ERROR: $srcdir/../lib/utils.exp doesn't exist"
+}
+
+# basic tests
+
+set testsuitedir /src/foo/testsuite
+set testbuilddir /build/foo/testsuite
+set testdir [file join $testsuitedir foo.all]
+
+run_tests {
+    { "#" "basic syntax errors" }
+    { lib_errpat_test testsuite { file }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without arguments" }
+    { lib_errpat_test testsuite { file -bogus }
+	"*unrecognized flag -bogus"
+	"testsuite file with bogus flag" }
+    { lib_errpat_test testsuite { file -- }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without directory level flag, only --" }
+    { lib_errpat_test testsuite { file -source }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without directory level flag, only -source" }
+    { lib_errpat_test testsuite { file -object }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without directory level flag, only -object" }
+    { lib_errpat_test testsuite { file -hypothetical }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without directory level flag, only -hypothetical" }
+    { lib_errpat_test testsuite { file -- foo bar }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without directory level flag, only -- and names" }
+    { lib_errpat_test testsuite { file foo bar }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file without directory level flag, only names" }
+    { lib_errpat_test testsuite { file -- -top }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file with directory level flag after --" }
+    { lib_errpat_test testsuite { file foo -top }
+	"*testsuite file requires one of *-top*-test*"
+	"testsuite file with directory level flag after name" }
+
+    { "#" "basic variable retrieval" }
+    { lib_ret_test testsuite
+	{ file -source -top -hypothetical } "/src/foo/testsuite"
+	"testsuite file -source -top for fixed example" }
+    { lib_ret_test testsuite
+	{ file -top -hypothetical } "/src/foo/testsuite"
+	"testsuite file -top defaults to -source" }
+    { lib_ret_test testsuite
+	{ file -object -top -hypothetical } "/build/foo/testsuite"
+	"testsuite file -object -top for fixed example" }
+    { lib_ret_test testsuite
+	{ file -source -test -hypothetical } "/src/foo/testsuite/foo.all"
+	"testsuite file -source -test for fixed example" }
+    { lib_ret_test testsuite
+	{ file -test -hypothetical } "/src/foo/testsuite/foo.all"
+	"testsuite file -test defaults to -source" }
+    { lib_ret_test testsuite
+	{ file -object -test -hypothetical } "/build/foo/testsuite/foo.all"
+	"testsuite file -object -test for fixed example" }
+
+    { "#" "append file name elements" }
+    { lib_ret_test testsuite
+	{ file -source -top -hypothetical lib foo }
+	"/src/foo/testsuite/lib/foo"
+	"testsuite file -source -top lib foo for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -top -hypothetical lib foo }
+	"/build/foo/testsuite/lib/foo"
+	"testsuite file -object -top lib foo for fixed example" }
+    { lib_ret_test testsuite
+	{ file -source -test -hypothetical bar }
+	"/src/foo/testsuite/foo.all/bar"
+	"testsuite file -source -test bar for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -test -hypothetical bar }
+	"/build/foo/testsuite/foo.all/bar"
+	"testsuite file -object -test bar for fixed example" }
+
+    { "#" "-- properly handled" }
+    { lib_ret_test testsuite
+	{ file -source -top -hypothetical -- -lib -- foo }
+	"/src/foo/testsuite/-lib/--/foo"
+	"testsuite file -source -top -- -lib -- foo for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -top -hypothetical -- -lib -foo }
+	"/build/foo/testsuite/-lib/-foo"
+	"testsuite file -object -top -- -lib -foo for fixed example" }
+    { lib_ret_test testsuite
+	{ file -source -test -hypothetical -- bar -object }
+	"/src/foo/testsuite/foo.all/bar/-object"
+	"testsuite file -source -test -- bar -object for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -test -hypothetical -- -bar }
+	"/build/foo/testsuite/foo.all/-bar"
+	"testsuite file -object -test -- -bar for fixed example" }
+
+    { "#" "apparent command substitutions are safe" }
+    { lib_ret_test testsuite
+	{ file -source -top -hypothetical lib foo [bogus] }
+	"/src/foo/testsuite/lib/foo/[bogus]"
+	"testsuite file -source -top foo [bogus] for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -top -hypothetical lib foo [bogus] }
+	"/build/foo/testsuite/lib/foo/[bogus]"
+	"testsuite file -object -top foo [bogus] for fixed example" }
+    { lib_ret_test testsuite
+	{ file -source -test -hypothetical bar [bogus] }
+	"/src/foo/testsuite/foo.all/bar/[bogus]"
+	"testsuite file -source -test bar [bogus] for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -test -hypothetical bar [bogus] }
+	"/build/foo/testsuite/foo.all/bar/[bogus]"
+	"testsuite file -object -test bar [bogus] for fixed example" }
+
+    { "#" "apparent variable substitutions are safe" }
+    { lib_ret_test testsuite
+	{ file -source -top -hypothetical lib foo $bogus }
+	"/src/foo/testsuite/lib/foo/$bogus"
+	"testsuite file -source -top foo $bogus for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -top -hypothetical lib foo $bogus }
+	"/build/foo/testsuite/lib/foo/$bogus"
+	"testsuite file -object -top foo $bogus for fixed example" }
+    { lib_ret_test testsuite
+	{ file -source -test -hypothetical bar $bogus }
+	"/src/foo/testsuite/foo.all/bar/$bogus"
+	"testsuite file -source -test bar $bogus for fixed example" }
+    { lib_ret_test testsuite
+	{ file -object -test -hypothetical bar $bogus }
+	"/build/foo/testsuite/foo.all/bar/$bogus"
+	"testsuite file -object -test bar $bogus for fixed example" }
+}
+
+set testsuitedir $srcdir
+set testbuilddir $objdir
+set testdir [file join $srcdir $subdir]
+
+run_tests [subst -nocommands {
+    { lib_ret_test testsuite { file -source -top } $srcdir
+	"testsuite file -source -top" }
+    { lib_ret_test testsuite { file -source -test } $testdir
+	"testsuite file -source -test" }
+    { lib_ret_test testsuite { file -object -top } $objdir
+	"testsuite file -object -top" }
+    { lib_errpat_test testsuite { file -source -test {[bogus]} foo }
+	"directory '*\\\\[bogus\\\\]' does not exist"
+	"testsuite file raises error on bogus source directory" }
+}]
+
+# test object directory creation
+
+if { [file isdirectory [file join $objdir empty-test-dir]] } {
+    file delete -force -- [file join $objdir empty-test-dir]
+}
+if { [file isdirectory [file join $objdir empty-test-dir]] } {
+    perror "[file join $objdir empty-test-dir] exists and cannot be removed"
+}
+
+run_tests [subst {
+    { lib_ret_test testsuite
+	{ file -object -top -hypothetical empty-test-dir foo }
+	[file join $objdir empty-test-dir foo]
+	"testsuite file implying hypothetical directory" }
+}]
+
+if { ![file isdirectory [file join $objdir empty-test-dir]] } {
+    puts "PASSED: testsuite file does not create hypothetical implied directory"
+} else {
+    puts "FAILED: testsuite file does not create hypothetical implied directory"
+}
+
+run_tests [subst {
+    { lib_ret_test testsuite
+	{ file -object -top empty-test-dir foo }
+	[file join $objdir empty-test-dir foo]
+	"testsuite file implying new object directory" }
+}]
+
+if { [file isdirectory [file join $objdir empty-test-dir]] } {
+    puts "PASSED: testsuite file creates new implied object directory"
+} else {
+    puts "FAILED: testsuite file creates new implied object directory"
+}
+
+file delete -force [file join $objdir empty-test-dir]
+
+puts "END testsuite_file.test"

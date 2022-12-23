@@ -1,0 +1,68 @@
+# Test procedures in lib/remote.exp.				-*- Tcl -*-
+#
+# Copyright (C) 1996-2019, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source $srcdir/$subdir/default_procs.tcl
+} else {
+    puts "ERROR: $srcdir/$subdir/default_procs.tcl doesn't exist"
+}
+
+proc load_lib { lib } {
+     global srcdir
+     source $srcdir/../lib/$lib
+}
+
+set file $srcdir/../lib/remote.exp
+if [ file exists $file] {
+    source $file
+} else {
+    puts "ERROR: $file doesn't exist"
+}
+
+global errno ""
+
+#
+# Create a false board config array
+#
+set board_info(idp,name)       "idp"
+set board_info(idp,ldflags)    "-Tidp.ld"
+set board_info(idp,config)     m68k-unknown-aout
+set board_info(idp,cflags)     ""
+set board_info(idp,connect)    telnet
+set board_info(idp,target)     "s12"
+set board_info(idp,serial)     "tstty12"
+set board_info(idp,netport)    "localhost:23"
+set board_info(idp,baud)       "9600"
+# MVME target
+set board_info(mvme,name)      "mvme"
+set board_info(mvme,ldflags)   "-Tmvme.ld"
+set board_info(mvme,config)    m68k-unknown-aout
+set board_info(mvme,cflags)    ""
+set board_info(mvme,connect)   telnet
+set board_info(mvme,target)    "s12"
+set board_info(mvme,serial)    "tstty8"
+set board_info(mvme,netport)   "localhost:23"
+set board_info(mvme,baud)      "9600"
+
+# Test remote open. We try not to use any of the support procs in
+# target.exp to for isolation testing. "target" is the name of the
+# default array setup by the procs in target.exp.
+
+puts "END remote.test"

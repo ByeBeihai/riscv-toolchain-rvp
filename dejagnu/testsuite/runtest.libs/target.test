@@ -1,0 +1,1666 @@
+# Test procedures in lib/target.exp.				-*- Tcl -*-
+#
+# Copyright (C) 1996-2019, 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+if [ file exists $srcdir/$subdir/default_procs.tcl ] {
+    source $srcdir/$subdir/default_procs.tcl
+} else {
+    puts "ERROR: $srcdir/$subdir/default_procs.tcl doesn't exist"
+}
+
+if [ file exists $srcdir/$subdir/mockutil.tcl ] {
+    source $srcdir/$subdir/mockutil.tcl
+} else {
+    puts "ERROR: $srcdir/$subdir/mockutil.tcl doesn't exist"
+}
+
+proc load_lib { lib } {
+     global srcdir
+     source $srcdir/../lib/$lib
+}
+
+foreach lib { targetdb target } {
+    set file $srcdir/../lib/${lib}.exp
+    if [ file exists $file] {
+	source $file
+    } else {
+	puts "ERROR: $file doesn't exist"
+    }
+}
+
+#
+# Create a false board config array
+#
+set board_info(idp,name)       "idp"
+set board_info(idp,ldscript)   "-Tidp.ld"
+set board_info(idp,config)     m68k-unknown-aout
+# MVME target
+set board_info(mvme,name)      "mvme"
+set board_info(mvme,ldscript)  "-Tmvme.ld"
+set board_info(mvme,config)    m68k-unknown-aout
+# testing default host
+set board_info(unix,cflags_for_target) "-DUNIX_CROSS_BUILD"
+
+#
+# Test push_config/pop_config
+#
+
+# test push_config target
+push_config target idp
+if { $target_info(target,name) eq "idp" } {
+    puts "PASSED: push_config target"
+} else {
+    puts "FAILED: push_config target"
+}
+
+# test pop_config target
+pop_config target
+if { ![info exists target_info(target,name)] } {
+    puts "PASSED: pop_config target"
+} else {
+    puts "FAILED: pop_config target"
+}
+
+push_config host idp
+if { $target_info(host,name) eq "idp" } {
+    puts "PASSED: push_config target"
+} else {
+    puts "FAILED: push_config target"
+}
+
+# test pop_config host
+pop_config host
+if { ![info exists target_info(host,name)] } {
+   puts "PASSED: pop_config host"
+} else {
+    puts "FAILED: pop_config host"
+}
+
+#
+# Test default_target_compile
+#
+
+# init call trace list
+reset_mock_trace
+# build test environment
+create_test_interpreter compile_test {
+    copy_procs { default_target_compile }
+    link_procs { verbose }
+    shim_procs { board_info host_info target_info }
+    vars {
+	build_triplet	"bogus-build-host"
+	host_triplet	"bogus-test-host"
+	target_triplet	"bogus-test-target"
+    }
+    mocks {
+	# major test shims
+	which			{ what }	{ $what }
+	remote_exec		{ args }	{ [list 0 "<exec_output>"] }
+	# minor test shims
+	prune_warnings		{ text }	{ $text }
+	# avoid the losing search for a libstdc++
+	isnative		{ args }	{ 0 }
+	# provide the special cases for C++
+	g++_include_flags	{ }		{ " -I/usr/include/g++" }
+	g++_link_flags		{ }		{ " -L/usr/lib/g++" }
+	# force local mode for initial testing
+	isremote		{ args }	{ 0 }
+    }
+}
+# mock find_* procedures from libgloss.exp
+foreach { prog } { gcc gcj g++ gdc g77 gfortran go go_linker rustc gnatmake
+		   nm gas ld } {
+    establish_mock compile_test find_$prog {} [list found-$prog]
+}
+
+# testing...
+# each item in testlist: { name code checks... }
+proc eval_tests { sicmd testlist } {
+    set testlist [strip_comment_lines $testlist]
+    foreach { test } $testlist {
+	if { [llength $test] > 2 } {
+	    eval [list test_proc_with_mocks [lindex $test 0] $sicmd \
+		      [lindex $test 1]] [lrange $test 2 end]
+	} else {
+	    $sicmd eval [lindex $test 1]
+	}
+    }
+}
+
+# set target
+push_config target idp
+
+eval_tests compile_test {
+    { "host defaults to 'unix' if not set"
+	{ default_target_compile "foo.c" "foo.o" object {} }
+	check_calls {
+	    "board_info unix" * { 2 exists 3 cflags_for_target }
+	    "board_info unix" * { 2 cflags_for_target }
+	    "remote_exec host" U
+	    { 2 {found-gcc -DUNIX_CROSS_BUILD -c -o foo.o foo.c} }
+	}
+    }
+}
+
+# set host
+push_config host mvme
+
+eval_tests compile_test {
+    { "query compiler configuration"
+	# This is an example adapted from the GCC testsuite.
+	{ default_target_compile "-dumpspecs" "" none {} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc -dumpspecs\s*} }
+	}
+    }
+}
+
+eval_tests compile_test {
+    { "minimal simple preprocess"
+	{ default_target_compile "foo.c" "" preprocess {} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc foo.c -E} }
+	}
+    }
+    { "minimal simple preprocess with output redirection"
+	{ default_target_compile "foo.c" "" preprocess {
+	    "redirect=bar_out"
+	} }
+	check_calls {
+	    "remote_exec host" U {
+		2 {found-gcc foo.c -E}
+		5 {bar_out}
+	    }
+	}
+    }
+    { "minimal simple preprocess with timeout"
+	{ default_target_compile "foo.c" "" preprocess {
+	    "timeout=1742"
+	} }
+	check_calls {
+	    "remote_exec host" U {
+		2 {found-gcc foo.c -E}
+		6 {1742}
+	    }
+	}
+    }
+    { "minimal simple compile to assembly"
+	{ default_target_compile "foo.c" "foo.s" assembly {} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc foo.c -S -o foo.s} }
+	}
+    }
+    { "minimal simple compile to object"
+	{ default_target_compile "foo.c" "foo.o" object {} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc -c -o foo.o foo.c} }
+	}
+    }
+    { "minimal simple compile and link"
+	{ default_target_compile "foo.c" "foo" executable {} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc foo.c -lm -Tidp.ld -o foo} }
+	}
+    }
+    { "minimal simple compile and link with debug option"
+	{ default_target_compile "foo.c" "foo" executable {debug} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc foo.c -g -lm -Tidp.ld -o foo} }
+	}
+    }
+
+    { "minimal simple preprocess with early flags"
+	{ default_target_compile "foo.c" "" preprocess {
+	    "early_flags=-fearly"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc -fearly foo.c -E} }
+	}
+    }
+    { "minimal simple compile to assembly with early flags"
+	{ default_target_compile "foo.c" "foo.s" assembly {
+	    "early_flags=-fearly"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc -fearly foo.c -S -o foo.s} }
+	}
+    }
+    { "minimal simple compile to object with early flags"
+	{ default_target_compile "foo.c" "foo.o" object {
+	    "early_flags=-fearly"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc -fearly -c -o foo.o foo.c} }
+	}
+    }
+    { "minimal simple compile and link with early flags"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "early_flags=-fearly"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gcc -fearly foo.c -lm -Tidp.ld -o foo} }
+	}
+    }
+}
+
+# add more keys to the board_info array for a more complex target description
+set board_info(idp,cflags)		"-I/usr/gnemul/idp/include"
+set board_info(idp,compiler)		"$board_info(idp,config)-gcc"
+set board_info(idp,debug_flags)		"-ggdb"
+set board_info(idp,ldflags)		"-L/usr/gnemul/idp/lib"
+set board_info(idp,libs)		"-lidpsup"
+set board_info(idp,mathlib)		"-lm_idp"
+set board_info(idp,multilib_flags)	"-midp"
+
+eval_tests compile_test {
+    { "preprocess with target compiler"
+	{ default_target_compile "foo.c" "" preprocess {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2
+	      {m68k-unknown-aout-gcc foo.c -midp -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile to assembly with target compiler"
+	{ default_target_compile "foo.c" "foo.s" assembly {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -S -I/usr/gnemul/idp/include
+		 -o foo.s} }
+	}
+    }
+    { "compile to object with target compiler"
+	{ default_target_compile "foo.c" "foo.o" object {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc -midp -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.c} }
+	}
+    }
+    { "compile and link with target compiler"
+	{ default_target_compile "foo.c" "foo" executable {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "compile and link with target compiler and target debug"
+	{ default_target_compile "foo.c" "foo" executable {debug} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -ggdb -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+}
+
+# add a few more keys for the remaining cases...
+set board_info(idp,remote_link)		idp_remote_link
+set board_info(idp,output_format)	coff
+
+eval_tests compile_test {
+    { "compile and link for remote linking"
+	{ default_target_compile "foo.c" "foo" executable {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -lidpsup -lm_idp -Tidp.ld
+		 -Wl,-r -Wl,-oformat,coff -o foo} }
+	}
+    }
+    { "compile and link for remote linking with debug"
+	{ default_target_compile "foo.c" "foo" executable {debug} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -ggdb -lidpsup -lm_idp -Tidp.ld
+		 -Wl,-r -Wl,-oformat,coff -o foo} }
+	}
+    }
+}
+
+# simplify by removing the most unusual options
+unset board_info(idp,remote_link) board_info(idp,output_format)
+
+eval_tests compile_test {
+    { "setup CFLAGS_FOR_TARGET"
+	{ set CFLAGS_FOR_TARGET "-DTARGET_FLAG" }
+    }
+    { "preprocess with target compiler and CFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "" preprocess {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2
+	      {m68k-unknown-aout-gcc foo.c -midp -DTARGET_FLAG -E
+	       -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile to assembly with target compiler and CFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo.s" assembly {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -DTARGET_FLAG -S
+		 -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile to object with target compiler and CFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo.o" object {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc -midp -DTARGET_FLAG -c
+		 -I/usr/gnemul/idp/include -o foo.o foo.c} }
+	}
+    }
+    { "compile and link with target compiler and CFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo" executable {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -DTARGET_FLAG
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up CFLAGS_FOR_TARGET"
+	{ unset CFLAGS_FOR_TARGET }
+    }
+    { "setup LDFLAGS_FOR_TARGET"
+	{ set LDFLAGS_FOR_TARGET "-ltarget" }
+    }
+    { "preprocess with target compiler and LDFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "" preprocess {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2
+	      {m68k-unknown-aout-gcc foo.c -midp -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile to assembly with target compiler and LDFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo.s" assembly {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -S -I/usr/gnemul/idp/include
+		 -o foo.s} }
+	}
+    }
+    { "compile to object with target compiler and LDFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo.o" object {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc -midp -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.c} }
+	}
+    }
+    { "compile and link with target compiler and LDFLAGS_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo" executable {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -ltarget -lidpsup -lm_idp -Tidp.ld
+		 -o foo} }
+	}
+    }
+    { "clean up LDFLAGS_FOR_TARGET"
+	{ unset LDFLAGS_FOR_TARGET }
+    }
+    { "setup CC_FOR_TARGET"
+	{ set CC_FOR_TARGET "target-gcc" }
+    }
+    { "preprocess with CC_FOR_TARGET"
+	{ default_target_compile "foo.c" "" preprocess {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U { 2
+	      {target-gcc foo.c -midp -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile to assembly with CC_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo.s" assembly {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gcc foo.c -midp -S -I/usr/gnemul/idp/include
+		 -o foo.s} }
+	}
+    }
+    { "compile to object with CC_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo.o" object {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gcc -midp -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.c} }
+	}
+    }
+    { "compile and link with CC_FOR_TARGET"
+	{ default_target_compile "foo.c" "foo" executable {} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gcc foo.c -midp -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up CC_FOR_TARGET"
+	{ unset CC_FOR_TARGET }
+    }
+}
+
+eval_tests compile_test {
+    { "override destination to host and compile and link"
+	{ default_target_compile "foo.c" "foo" executable {"dest=host"} }
+	check_calls {
+	    "board_info host" * { 2 exists 3 name }
+	    "board_info host" * { 2 name }
+	    "remote_exec host" U
+	    { 2 {found-gcc foo.c -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link with host-gcc"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "dest=host" "compiler=host-gcc"
+	} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "board_info host" * { 2 exists 3 name }
+	    "board_info host" * { 2 name }
+	    "remote_exec host" U
+	    { 2 {host-gcc foo.c -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link with host-gcc via linker"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "dest=host" "linker=host-gcc"
+	} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "board_info host" * { 2 exists 3 name }
+	    "board_info host" * { 2 name }
+	    "remote_exec host" U
+	    { 2 {host-gcc foo.c -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link with host-gcc-ld via linker"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "dest=host" "compiler=host-gcc" "linker=host-gcc-ld"
+	} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "board_info host" * { 2 exists 3 name }
+	    "board_info host" * { 2 name }
+	    "remote_exec host" U
+	    { 2 {host-gcc-ld foo.c -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override ldscript"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "ldscript=-Tspecial.ld"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tspecial.ld -o foo} }
+	}
+    }
+}
+
+eval_tests compile_test {
+    { "insert additional flags"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "additional_flags=-fextra-flag-for-test"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -fextra-flag-for-test
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "insert additional flags and ldflags"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "additional_flags=-fextra-flag-for-test"
+	    "ldflags=-Wl,--extra-linker-flag"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -fextra-flag-for-test
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "insert additional flags, ldflags, and incdir"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "additional_flags=-fextra-flag-for-test"
+	    "ldflags=-Wl,--extra-linker-flag"
+	    "incdir=/usr/test/include"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -fextra-flag-for-test
+		 -I/usr/test/include
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "insert additional flags, ldflags, and incdirs"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "additional_flags=-fextra-flag-for-test"
+	    "ldflags=-Wl,--extra-linker-flag"
+	    "incdir=/usr/test/include" "incdir=/usr/test/include2"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -fextra-flag-for-test
+		 -I/usr/test/include -I/usr/test/include2
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "insert additional flags, ldflags, incdirs, and libdir"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "additional_flags=-fextra-flag-for-test"
+	    "ldflags=-Wl,--extra-linker-flag"
+	    "incdir=/usr/test/include" "incdir=/usr/test/include2"
+	    "libdir=/usr/test/lib"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -fextra-flag-for-test
+		 -I/usr/test/include -I/usr/test/include2
+		 -L/usr/test/lib
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "insert additional flags, ldflags, incdirs, and libdirs"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "additional_flags=-fextra-flag-for-test"
+	    "ldflags=-Wl,--extra-linker-flag"
+	    "incdir=/usr/test/include" "incdir=/usr/test/include2"
+	    "libdir=/usr/test/lib" "libdir=/usr/test/lib2"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -fextra-flag-for-test
+		 -I/usr/test/include -I/usr/test/include2
+		 -L/usr/test/lib -L/usr/test/lib2
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "insert additional flags, ldflags, incdirs, and libdirs shuffled"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "incdir=/usr/test/include"
+	    "additional_flags=-fextra-flag-for-test"  "libdir=/usr/test/lib"
+	    "ldflags=-Wl,--extra-linker-flag"
+	    "additional_flags=-fanother-extra-flag"
+	    "incdir=/usr/test/include2" "libdir=/usr/test/lib2"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/test/include
+		 -fextra-flag-for-test -L/usr/test/lib -fanother-extra-flag
+		 -I/usr/test/include2 -L/usr/test/lib2
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "previous test with optimization flag added"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "incdir=/usr/test/include" "optimize=-O2 -foptimize"
+	    "additional_flags=-fextra-flag-for-test"  "libdir=/usr/test/lib"
+	    "ldflags=-Wl,--extra-linker-flag"
+	    "additional_flags=-fanother-extra-flag"
+	    "incdir=/usr/test/include2" "libdir=/usr/test/lib2"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/test/include
+		 -fextra-flag-for-test -L/usr/test/lib -fanother-extra-flag
+		 -I/usr/test/include2 -L/usr/test/lib2
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -O2 -foptimize
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "previous test with optimization flag added and debugging selected"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "incdir=/usr/test/include" "debug"
+	    "additional_flags=-fextra-flag-for-test"  "libdir=/usr/test/lib"
+	    "ldflags=-Wl,--extra-linker-flag" "optimize=-O2 -foptimize-debug"
+	    "additional_flags=-fanother-extra-flag"
+	    "incdir=/usr/test/include2" "libdir=/usr/test/lib2"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp -I/usr/test/include
+		 -fextra-flag-for-test -L/usr/test/lib -fanother-extra-flag
+		 -I/usr/test/include2 -L/usr/test/lib2
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -ggdb -O2 -foptimize-debug
+		 -Wl,--extra-linker-flag -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+}
+
+# add more keys to the board_info array for testing other language support
+set board_info(idp,adaflags)		"-fada"
+set board_info(idp,cxxflags)		"-fgnu-c++"
+set board_info(idp,dflags)		"-fdflag"
+set board_info(idp,f77flags)		"-flong-f77-flag"
+set board_info(idp,f90flags)		"-flonger-f90-flag"
+set board_info(idp,goflags)		"-fgo"
+set board_info(idp,rustflags)		"-frust"
+foreach {k v} {
+    gnatmake gnatmake	    c++compiler g++		dcompiler gdc
+    f77compiler g77	    f90compiler gfortran	rustcompiler rustc
+    gocompiler gccgo	    golinker gccgo-ld
+} { set board_info(idp,$k)		"$board_info(idp,config)-$v" }
+
+eval_tests compile_test {
+
+    # Ada
+    # TODO FIXME:  These tests verify the currently-known-broken Ada support.
+    { "preprocess Ada with target compiler"
+	{ default_target_compile "foo.adb" "" preprocess {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gnatmake foo.adb -midp -largs -midp -margs
+		 -fada -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Ada to assembly with target compiler"
+	{ default_target_compile "foo.adb" "foo.s" assembly {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gnatmake foo.adb -midp -largs -midp -margs
+		 -fada -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Ada to object with target compiler"
+	{ default_target_compile "foo.adb" "foo.o" object {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gnatmake -midp -largs -midp -margs -fada
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.adb} }
+	}
+    }
+    { "compile and link Ada with target compiler"
+	{ default_target_compile "foo.adb" "foo" executable {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gnatmake foo.adb -midp -largs -midp -margs
+		 -fada -I/usr/gnemul/idp/include -largs -L/usr/gnemul/idp/lib
+		 -margs -largs -lidpsup -lm_idp -Tidp.ld -margs -o foo} }
+	}
+    }
+
+    { "setup GNATMAKE_FOR_TARGET"
+	{ set GNATMAKE_FOR_TARGET "target-gnatmake" }
+    }
+    { "preprocess Ada with GNATMAKE_FOR_TARGET"
+	{ default_target_compile "foo.adb" "" preprocess {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gnatmake foo.adb -midp -largs -midp -margs -fada
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Ada to assembly with GNATMAKE_FOR_TARGET"
+	{ default_target_compile "foo.adb" "foo.s" assembly {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gnatmake foo.adb -midp -largs -midp -margs -fada
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Ada to object with GNATMAKE_FOR_TARGET"
+	{ default_target_compile "foo.adb" "foo.o" object {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gnatmake -midp -largs -midp -margs -fada
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.adb} }
+	}
+    }
+    { "compile and link Ada with GNATMAKE_FOR_TARGET"
+	{ default_target_compile "foo.adb" "foo" executable {ada} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gnatmake" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gnatmake foo.adb -midp -largs -midp -margs -fada
+		 -I/usr/gnemul/idp/include -largs -L/usr/gnemul/idp/lib -margs
+		 -largs -lidpsup -lm_idp -Tidp.ld -margs -o foo} }
+	}
+    }
+    { "clean up GNATMAKE_FOR_TARGET"
+	{ unset GNATMAKE_FOR_TARGET }
+    }
+
+    { "override destination to host and compile and link Ada"
+	{ default_target_compile "foo.adb" "foo" executable {
+	    "dest=host" ada
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {found-gnatmake foo.adb -largs -lm -Tmvme.ld -margs -o foo} }
+	}
+    }
+    { "override destination to host and compile and link Ada with host-gnatmake"
+	{ default_target_compile "foo.adb" "foo" executable {
+	    "dest=host" ada "compiler=host-gnatmake"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {host-gnatmake foo.adb -largs -lm -Tmvme.ld -margs -o foo} }
+	}
+    }
+
+    # C++
+    { "preprocess C++ with target compiler"
+	{ default_target_compile "foo.cxx" "" preprocess {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g\+\+ foo.cxx -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile C++ to assembly with target compiler"
+	{ default_target_compile "foo.cxx" "foo.s" assembly {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g\+\+ foo.cxx -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile C++ to object with target compiler"
+	{ default_target_compile "foo.cxx" "foo.o" object {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g\+\+ -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.cxx} }
+	}
+    }
+    { "compile and link C++ with target compiler"
+	{ default_target_compile "foo.cxx" "foo" executable {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g\+\+ foo.cxx -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -L/usr/lib/g\+\+
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+
+    { "setup CXX_FOR_TARGET"
+	{ set CXX_FOR_TARGET "target-g++" }
+    }
+    { "preprocess C++ with CXX_FOR_TARGET"
+	{ default_target_compile "foo.cxx" "" preprocess {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g\+\+ foo.cxx -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile C++ to assembly with CXX_FOR_TARGET"
+	{ default_target_compile "foo.cxx" "foo.s" assembly {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g\+\+ foo.cxx -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile C++ to object with CXX_FOR_TARGET"
+	{ default_target_compile "foo.cxx" "foo.o" object {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g\+\+ -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.cxx} }
+	}
+    }
+    { "compile and link C++ with CXX_FOR_TARGET"
+	{ default_target_compile "foo.cxx" "foo" executable {c++} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g++" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g\+\+ foo.cxx -midp -fgnu-c\+\+
+		 -I/usr/include/g\+\+ -I/usr/gnemul/idp/include
+		 -L/usr/gnemul/idp/lib -L/usr/lib/g\+\+
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up CXX_FOR_TARGET"
+	{ unset CXX_FOR_TARGET }
+    }
+
+    { "override destination to host and compile and link C++"
+	{ default_target_compile "foo.cxx" "foo" executable {
+	    "dest=host" c++
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {found-g\+\+ foo.cxx -I/usr/include/g\+\+ -L/usr/lib/g\+\+
+		 -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link C++ with host-g++"
+	{ default_target_compile "foo.cxx" "foo" executable {
+	    "dest=host" c++ "compiler=host-g++"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {host-g\+\+ foo.cxx -I/usr/include/g\+\+ -L/usr/lib/g\+\+
+		 -lm -Tmvme.ld -o foo} }
+	}
+    }
+
+    # D
+    { "preprocess D with target compiler"
+	{ default_target_compile "foo.d" "" preprocess {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gdc foo.d -midp -fdflag
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile D to assembly with target compiler"
+	{ default_target_compile "foo.d" "foo.s" assembly {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gdc foo.d -midp -fdflag
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile D to object with target compiler"
+	{ default_target_compile "foo.d" "foo.o" object {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gdc -midp -fdflag
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.d} }
+	}
+    }
+    { "compile and link D with target compiler"
+	{ default_target_compile "foo.d" "foo" executable {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gdc foo.d -midp -fdflag
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+
+    { "setup D_FOR_TARGET"
+	{ set D_FOR_TARGET "target-gdc" }
+    }
+    { "preprocess D with D_FOR_TARGET"
+	{ default_target_compile "foo.d" "" preprocess {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gdc foo.d -midp -fdflag
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile D to assembly with D_FOR_TARGET"
+	{ default_target_compile "foo.d" "foo.s" assembly {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gdc foo.d -midp -fdflag
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile D to object with D_FOR_TARGET"
+	{ default_target_compile "foo.d" "foo.o" object {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gdc -midp -fdflag
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.d} }
+	}
+    }
+    { "compile and link D with D_FOR_TARGET"
+	{ default_target_compile "foo.d" "foo" executable {d} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gdc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gdc foo.d -midp -fdflag
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up D_FOR_TARGET"
+	{ unset D_FOR_TARGET }
+    }
+
+    { "override destination to host and compile and link D"
+	{ default_target_compile "foo.d" "foo" executable {
+	    "dest=host" d
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-gdc foo.d -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link D with host-gdc"
+	{ default_target_compile "foo.d" "foo" executable {
+	    "dest=host" d "compiler=host-gdc"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {host-gdc foo.d -lm -Tmvme.ld -o foo} }
+	}
+    }
+
+    # Fortran 77
+    { "preprocess Fortran 77 with target compiler"
+	{ default_target_compile "foo.f" "" preprocess {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g77 foo.f -midp -flong-f77-flag
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Fortran 77 to assembly with target compiler"
+	{ default_target_compile "foo.f" "foo.s" assembly {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g77 foo.f -midp -flong-f77-flag
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Fortran 77 to object with target compiler"
+	{ default_target_compile "foo.f" "foo.o" object {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g77 -midp -flong-f77-flag
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.f} }
+	}
+    }
+    { "compile and link Fortran 77 with target compiler"
+	{ default_target_compile "foo.f" "foo" executable {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-g77 foo.f -midp -flong-f77-flag
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+
+    { "setup F77_FOR_TARGET"
+	{ set F77_FOR_TARGET "target-g77" }
+    }
+    { "preprocess Fortran 77 with F77_FOR_TARGET"
+	{ default_target_compile "foo.f" "" preprocess {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g77 foo.f -midp -flong-f77-flag
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Fortran 77 to assembly with F77_FOR_TARGET"
+	{ default_target_compile "foo.f" "foo.s" assembly {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g77 foo.f -midp -flong-f77-flag
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Fortran 77 to object with F77_FOR_TARGET"
+	{ default_target_compile "foo.f" "foo.o" object {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g77 -midp -flong-f77-flag
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.f} }
+	}
+    }
+    { "compile and link Fortran 77 with F77_FOR_TARGET"
+	{ default_target_compile "foo.f" "foo" executable {f77} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_g77" ! {}
+	    "remote_exec host" U
+	    { 2 {target-g77 foo.f -midp -flong-f77-flag
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up F77_FOR_TARGET"
+	{ unset F77_FOR_TARGET }
+    }
+
+    { "override destination to host and compile and link Fortran 77"
+	{ default_target_compile "foo.f" "foo" executable {
+	    "dest=host" f77
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-g77 foo.f -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link Fortran 77 with host-g77"
+	{ default_target_compile "foo.f" "foo" executable {
+	    "dest=host" f77 "compiler=host-g77"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {host-g77 foo.f -lm -Tmvme.ld -o foo} }
+	}
+    }
+
+    # Fortran 90
+    { "preprocess Fortran 90 with target compiler"
+	{ default_target_compile "foo.f90" "" preprocess {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gfortran foo.f90 -midp -flonger-f90-flag
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Fortran 90 to assembly with target compiler"
+	{ default_target_compile "foo.f90" "foo.s" assembly {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gfortran foo.f90 -midp -flonger-f90-flag
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Fortran 90 to object with target compiler"
+	{ default_target_compile "foo.f90" "foo.o" object {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gfortran -midp -flonger-f90-flag
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.f90} }
+	}
+    }
+    { "compile and link Fortran 90 with target compiler"
+	{ default_target_compile "foo.f90" "foo" executable {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gfortran foo.f90 -midp -flonger-f90-flag
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+
+    { "setup F90_FOR_TARGET"
+	{ set F90_FOR_TARGET "target-gfortran" }
+    }
+    { "preprocess Fortran 90 with F90_FOR_TARGET"
+	{ default_target_compile "foo.f90" "" preprocess {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gfortran foo.f90 -midp -flonger-f90-flag
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Fortran 90 to assembly with F90_FOR_TARGET"
+	{ default_target_compile "foo.f90" "foo.s" assembly {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gfortran foo.f90 -midp -flonger-f90-flag
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Fortran 90 to object with F90_FOR_TARGET"
+	{ default_target_compile "foo.f90" "foo.o" object {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gfortran -midp -flonger-f90-flag
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.f90} }
+	}
+    }
+    { "compile and link Fortran 90 with F90_FOR_TARGET"
+	{ default_target_compile "foo.f90" "foo" executable {f90} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_gfortran" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gfortran foo.f90 -midp -flonger-f90-flag
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up F90_FOR_TARGET"
+	{ unset F90_FOR_TARGET }
+    }
+
+    { "override destination to host and compile and link Fortran 77"
+	{ default_target_compile "foo.f90" "foo" executable {
+	    "dest=host" f90
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {found-gfortran foo.f90 -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link Fortran 90 with host-gfortran"
+	{ default_target_compile "foo.f90" "foo" executable {
+	    "dest=host" f90 "compiler=host-gfortran"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {host-gfortran foo.f90 -lm -Tmvme.ld -o foo} }
+	}
+    }
+
+    # Go
+    { "preprocess Go with target compiler"
+	{ default_target_compile "foo.go" "" preprocess {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gccgo foo.go -midp -fgo
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Go to assembly with target compiler"
+	{ default_target_compile "foo.go" "foo.s" assembly {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gccgo foo.go -midp -fgo
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Go to object with target compiler"
+	{ default_target_compile "foo.go" "foo.o" object {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gccgo -midp -fgo
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.go} }
+	}
+    }
+    { "compile and link Go with target compiler"
+	{ default_target_compile "foo.go" "foo" executable {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gccgo-ld foo.go -midp -fgo
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+
+    { "setup GO_FOR_TARGET"
+	{ set GO_FOR_TARGET "target-gccgo" }
+    }
+    { "preprocess Go with GO_FOR_TARGET"
+	{ default_target_compile "foo.go" "" preprocess {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gccgo foo.go -midp -fgo
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Go to assembly with GO_FOR_TARGET"
+	{ default_target_compile "foo.go" "foo.s" assembly {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gccgo foo.go -midp -fgo
+		 -S -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Go to object with GO_FOR_TARGET"
+	{ default_target_compile "foo.go" "foo.o" object {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gccgo -midp -fgo
+		 -c -I/usr/gnemul/idp/include
+		 -o foo.o foo.go} }
+	}
+    }
+    { "clean up GO_FOR_TARGET"
+	{ unset GO_FOR_TARGET }
+    }
+    { "setup GO_LD_FOR_TARGET"
+	{ set GO_LD_FOR_TARGET "target-gccgo-ld" }
+    }
+    { "compile and link Go with GO_LD_FOR_TARGET"
+	{ default_target_compile "foo.go" "foo" executable {go} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_go" ! {}
+	    "find_go_linker" ! {}
+	    "remote_exec host" U
+	    { 2 {target-gccgo-ld foo.go -midp -fgo
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up GO_LD_FOR_TARGET"
+	{ unset GO_LD_FOR_TARGET }
+    }
+
+    { "override destination to host and compile Go to object"
+	{ default_target_compile "foo.go" "foo.o" object {
+	    "dest=host" go
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-go -c -o foo.o foo.go} }
+	}
+    }
+    { "override destination to host and compile Go to object with host-gccgo"
+	{ default_target_compile "foo.go" "foo.o" object {
+	    "dest=host" go "compiler=host-gccgo"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {host-gccgo -c -o foo.o foo.go} }
+	}
+    }
+    { "override destination to host and compile and link Go"
+	{ default_target_compile "foo.go" "foo" executable {
+	    "dest=host" go
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {found-go_linker foo.go -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link Go with host-gccgo-ld"
+	{ default_target_compile "foo.go" "foo" executable {
+	    "dest=host" go "compiler=host-gccgo" "linker=host-gccgo-ld"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {host-gccgo-ld foo.go -lm -Tmvme.ld -o foo} }
+	}
+    }
+
+    # Rust
+    { "preprocess Rust with target compiler"
+	{ default_target_compile "foo.rs" "" preprocess {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-rustc foo.rs -midp -frust
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Rust to assembly with target compiler"
+	{ default_target_compile "foo.rs" "foo.s" assembly {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-rustc foo.rs -midp -frust
+		 --emit asm -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Rust to object with target compiler"
+	{ default_target_compile "foo.rs" "foo.o" object {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-rustc -midp -frust
+		 --emit obj -I/usr/gnemul/idp/include
+		 -o foo.o foo.rs} }
+	}
+    }
+    { "compile and link Rust with target compiler"
+	{ default_target_compile "foo.rs" "foo" executable {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-rustc foo.rs -midp -frust
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+
+    { "setup RUSTC_FOR_TARGET"
+	{ set RUSTC_FOR_TARGET "target-rustc" }
+    }
+    { "preprocess Rust with RUSTC_FOR_TARGET"
+	{ default_target_compile "foo.rs" "" preprocess {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-rustc foo.rs -midp -frust
+		 -E -I/usr/gnemul/idp/include} }
+	}
+    }
+    { "compile Rust to assembly with RUSTC_FOR_TARGET"
+	{ default_target_compile "foo.rs" "foo.s" assembly {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-rustc foo.rs -midp -frust
+		 --emit asm -I/usr/gnemul/idp/include -o foo.s} }
+	}
+    }
+    { "compile Rust to object with RUSTC_FOR_TARGET"
+	{ default_target_compile "foo.rs" "foo.o" object {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-rustc -midp -frust
+		 --emit obj -I/usr/gnemul/idp/include
+		 -o foo.o foo.rs} }
+	}
+    }
+    { "compile and link Rust with RUSTC_FOR_TARGET"
+	{ default_target_compile "foo.rs" "foo" executable {rust} }
+	check_calls {
+	    "find_gcc" ! {}
+	    "find_rustc" ! {}
+	    "remote_exec host" U
+	    { 2 {target-rustc foo.rs -midp -frust
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "clean up RUSTC_FOR_TARGET"
+	{ unset RUSTC_FOR_TARGET }
+    }
+
+    { "override destination to host and compile and link Rust"
+	{ default_target_compile "foo.rs" "foo" executable {
+	    "dest=host" rust
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {found-rustc foo.rs -lm -Tmvme.ld -o foo} }
+	}
+    }
+    { "override destination to host and compile and link Rust with host-rustc"
+	{ default_target_compile "foo.rs" "foo" executable {
+	    "dest=host" rust "compiler=host-rustc"
+	} }
+	check_calls {
+	    "remote_exec host" U { 2 {host-rustc foo.rs -lm -Tmvme.ld -o foo} }
+	}
+    }
+
+}
+
+# mock [file exists ...] in slave interpreter for testing libs= option
+establish_mock_log_alias compile_test file
+compile_test eval {
+    proc file { op name } {
+	logcall_file $op $name
+	if { $op eq "exists" } {
+	    if { $name eq "bar_src" } {
+		return 1
+	    } else {
+		return 0
+	    }
+	} else {
+	    error "unimplemented"
+	}
+    }
+}
+
+eval_tests compile_test {
+    { "test libs= as linker option"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "libs=-lbar"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c -midp
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lbar -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+    { "test libs= as extra source"
+	{ default_target_compile "foo.c" "foo" executable {
+	    "libs=bar_src"
+	} }
+	check_calls {
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc foo.c bar_src -midp
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o foo} }
+	}
+    }
+}
+
+delete_test_interpreter compile_test
+
+create_test_interpreter compile_remote_test {
+    copy_procs { default_target_compile }
+    link_procs { verbose }
+    shim_procs { board_info host_info target_info }
+    vars {
+	build_triplet	"bogus-build-host"
+	host_triplet	"bogus-test-host"
+	target_triplet	"bogus-test-target"
+    }
+    mocks {
+	# major test shims
+	which			{ what }	  { $what }
+	remote_download		{ where what }	  { "remote-$what" }
+	remote_exec		{ args }	  { [list 0 "<exec_output>"] }
+	remote_file		{ where op what } { [list $op $what] }
+	remote_upload		{ where what to } { [list $what $to] }
+	# minor test shims
+	prune_warnings		{ text }	  { $text }
+	# avoid the losing search for a libstdc++
+	isnative		{ args }	  { 0 }
+	# provide the special cases for C++
+	g++_include_flags	{ }		  { " -I/usr/include/g++" }
+	g++_link_flags		{ }		  { " -L/usr/lib/g++" }
+	# force remote mode for remote testing
+	isremote		{ args }	  { 1 }
+	# catch writing "atfile"
+	open			{ what how }	  { "iofile0" }
+	close			{ what }	  { "" }
+	puts			{ args }	  { "" }
+    }
+}
+# mock find_* procedures from libgloss.exp
+foreach { prog } { gcc gcj g++ gdc g77 gfortran gnatmake nm gas ld } {
+    establish_mock compile_remote_test find_$prog {} [list found-$prog]
+}
+
+eval_tests compile_remote_test {
+    { "simple remote preprocess"
+	{ default_target_compile "foo.c" "foo.i" preprocess {} }
+	check_calls {
+	    "which" ! {}
+	    "remote_download host" U { 2 foo.c }
+	    "remote_file host" 0 { 2 delete 3 a.out }
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc remote-foo.c -midp -E
+		 -I/usr/gnemul/idp/include -o a.out} }
+	    "remote_upload host" U { 2 a.out 3 foo.i }
+	    "remote_file host" 1 { 2 delete 3 a.out }
+	}
+    }
+    { "simple remote compile and link"
+	{ default_target_compile "foo.c bar.c" "foobar" executable {} }
+	check_calls {
+	    "which" ! {}
+	    "remote_download host" 0 { 2 foo.c }
+	    "remote_download host" 1 { 2 bar.c }
+	    "remote_file host" 0 { 2 delete 3 a.out }
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc remote-foo.c remote-bar.c -midp
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o a.out} }
+	    "remote_upload host" U { 2 a.out 3 foobar }
+	    "remote_file host" 1 { 2 delete 3 a.out }
+	}
+    }
+}
+
+set board_info(mvme,use_at)	1
+
+eval_tests compile_remote_test {
+    { "simple remote preprocess with atfile"
+	{ default_target_compile "foo.c" "foo.i" preprocess {} }
+	check_calls {
+	    "which" ! {}
+	    "remote_download host" 0 { 2 foo.c }
+	    "remote_file host" 0 { 2 delete 3 a.out }
+	    "open atfile w" U { 1 atfile }
+	    "puts iofile0" U
+	    { 2 {\s*remote-foo.c -midp -E -I/usr/gnemul/idp/include -o a.out} }
+	    "close iofile0" U { 1 iofile0 }
+	    "remote_download host" 1 { 2 atfile }
+	    "remote_file build delete" U { 3 atfile }
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc @remote-atfile} }
+	    "remote_upload host" U { 2 a.out 3 foo.i }
+	    "remote_file host" 1 { 2 delete 3 a.out }
+	}
+    }
+    { "simple remote compile and link with atfile"
+	{ default_target_compile "foo.c bar.c" "foobar" executable {} }
+	check_calls {
+	    "which" ! {}
+	    "remote_download host" 0 { 2 foo.c }
+	    "remote_download host" 1 { 2 bar.c }
+	    "remote_file host" 0 { 2 delete 3 a.out }
+	    "open atfile w" U { 1 atfile }
+	    "puts iofile0" U
+	    { 2 {\s*remote-foo.c remote-bar.c -midp
+		 -I/usr/gnemul/idp/include -L/usr/gnemul/idp/lib
+		 -lidpsup -lm_idp -Tidp.ld -o a.out} }
+	    "close iofile0" U { 1 iofile0 }
+	    "remote_download host" 2 { 2 atfile }
+	    "remote_file build delete" U { 3 atfile }
+	    "remote_exec host" U
+	    { 2 {m68k-unknown-aout-gcc @remote-atfile} }
+	    "remote_upload host" U { 2 a.out 3 foobar }
+	    "remote_file host" 1 { 2 delete 3 a.out }
+	}
+    }
+}
+
+delete_test_interpreter compile_remote_test
+
+puts "END target.test"

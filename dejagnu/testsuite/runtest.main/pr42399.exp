@@ -1,0 +1,66 @@
+# Copyright (C) 2020 Free Software Foundation, Inc.
+#
+# This file is part of DejaGnu.
+#
+# DejaGnu is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# DejaGnu is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with DejaGnu; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+# This file is a regression test for PR42399, where timing variations can
+# cause test names to be truncated under certain conditions.
+
+# The bug was originally reported using a C test case, but GNU Awk is
+# sufficiently fast for a simple Awk script to also trigger the bug.
+
+# The bug was originally reported as only affecting long test names, but
+# the underlying issue applies equally to shorter names, as long as the
+# unit test program produces output faster than DejaGnu can read it.
+
+runtest_setup_nested_testsuite
+
+proc test_pr42399 {} {
+    global RUNTEST
+
+    foreach test_count {5 5000} {
+	set result pass
+	set eof_reached 0
+	set want_num 1
+	set cmd_args [list --local_init nested-init.exp --tool bug \
+			    -a pr42399-sub.exp N=$test_count]
+	verbose "Spawning $RUNTEST $cmd_args ..."
+	eval [list spawn $RUNTEST] $cmd_args
+	expect {
+	    -re {PASS:[[:space:]]+([^\r\n]*)[\r\n]+} {
+		if { [regexp {sample test ([0-9]+)} \
+			  $expect_out(1,string) -> read_num] } {
+		    if { $read_num != $want_num } { set result fail }
+		} else { set result fail }
+		incr want_num
+		exp_continue
+	    }
+	    eof {
+		set eof_reached 1
+	    }
+	}
+	# Were any results at all produced?
+	if { $want_num == 1 } { set result unresolved }
+	# Did Expect report eof?
+	if { ! $eof_reached } { set result unresolved }
+	# emit test result
+	$result "PR42399 test with $test_count inner tests"
+    }
+}
+
+test_pr42399
+
+runtest_cleanup_nested_testsuite
